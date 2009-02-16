@@ -1,0 +1,13 @@
+NICKNAME_LIST = ['FedEx']
+DEBUG_MODE = True
+FEEDEX_ROOT = r'F:\devel\ircbot2\trunk\feedex'
+
+SERVER_LIST = [
+    ('irc.hanirc.org', 6665),
+]
+USE_SSL = False
+BUFFER_PERIOD = 1
+
+FETCH_PERIOD = 1
+FREQUENT_FETCH_PERIOD = 1
+
