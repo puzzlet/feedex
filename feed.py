@@ -119,26 +119,30 @@ class FeedBot(Bot):
             self.spew('Invalid character in %s' % uri)
             return
 
+        future = time.time() + FUTURE_THRESHOLD
         spam.entries.reverse()
         for entry in spam.entries:
             if not entry.get('updated_parsed', None):
                 trace('Erroneous feed at %s' % uri)
                 return
             t = mktime(entry.updated_parsed)
+            if t > future:
+                continue
+            if t <= reference_timestamp:
+                continue
+            timestamps.append(t)
             time_string = datetime.datetime.fromtimestamp(t, KoreanStandardTime()).isoformat(' ')
-            if t > reference_timestamp:
-                timestamps.append(t)
-                for x in self.feeds[uri]:
-                    kwargs = dict(x['data'])
-                    kwargs['time'] = time_string
-                    result = x['handler']['display'](entry, kwargs)
-                    if not result:
-                        continue
-                    target, msg, opt = result
-                    opt['uri'] = uri
-                    opt['timestamp'] = t
-                    opt['callback'] = [self.feed_callback]
-                    self.buffer.append((target, msg, opt))
+            for x in self.feeds[uri]:
+                kwargs = dict(x['data'])
+                kwargs['time'] = time_string
+                result = x['handler']['display'](entry, kwargs)
+                if not result:
+                    continue
+                target, msg, opt = result
+                opt['uri'] = uri
+                opt['timestamp'] = t
+                opt['callback'] = [self.feed_callback]
+                self.buffer.append((target, msg, opt))
 
         if timestamps:
             self.last_checked[uri] = max(timestamps)
@@ -195,18 +199,22 @@ class FeedBot(Bot):
         self.save_timestamp(uri, self.timestamps_temp[uri])
 
     def load_timestamp(self, uri):
+        now = time.time()
         file_name = os.path.join(FEEDEX_ROOT, 'timestamps', quote(uri, ''))
         if not os.access(file_name, os.F_OK):
-            result = time.time()
-            open(file_name, 'w').write(str(result))
-            return result
+            self.save_timestamp(uri, now)
+            return now
         try:
             f = open(file_name, 'r')
             result = float(f.read())
             f.close()
+            if result > now + FUTURE_THRESHOLD:
+                self.save_timestamp(uri, now)
+                return now
             return result
         except:
-            return time()
+            pass
+        return now
 
     def save_timestamp(self, uri, timestamp):
         path = os.path.join(FEEDEX_ROOT, 'timestamps', quote(uri, ''))
