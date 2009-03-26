@@ -1,3 +1,5 @@
+import sys
+import traceback
 import signal
 import time
 import chardet
@@ -39,11 +41,13 @@ def timed_out(timeout):
             try:
                 result = f(*args, **kwargs)
             except Exception, e:
-                pass
+                type, value, tb = sys.exc_info()
             finally:
                 signal.signal(signal.SIGALRM, old)
             signal.alarm(0)
             if e:
+                traceback.print_tb(tb)
+                print e
                 raise e
             return result
         

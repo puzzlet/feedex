@@ -1,6 +1,6 @@
 NICKNAME_LIST = ['FedEx']
 DEBUG_MODE = True
-FEEDEX_ROOT = r'F:\devel\ircbot2\trunk\feedex'
+FEEDEX_ROOT = os.path.dirname(os.path.absname(__file__))
 
 SERVER_LIST = [
     ('irc.hanirc.org', 6665),

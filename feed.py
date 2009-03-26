@@ -4,10 +4,14 @@ import imp
 import os
 import datetime
 from time import time, mktime 
-from urllib import quote
+try: # preparing for Python 3.0
+    from urllib.parse import quote
+except ImportError:
+    from urllib import quote
 from collections import defaultdict
 
 import feedparser
+from irclib import is_channel
 from ircbot import SingleServerIRCBot as Bot
 from ircbot import ServerConnectionError
 
@@ -33,7 +37,7 @@ class FeedBot(Bot):
         Bot.__init__(self, server_list, nick_list[0], realname, reconnection_interval)
         self.initialized = False
         self.connection.add_global_handler('welcome', self._on_connected)
-        self.connection.add_global_handler('pubmsg', self._on_msg, 0)
+        self.connection.add_global_handler('privmsg', self._on_msg, 0)
 
         self.autojoin_channels = set()
         self.feeds = defaultdict(list)
@@ -41,9 +45,7 @@ class FeedBot(Bot):
         self.last_checked = {}
         self.buffer = []
 
-        self.handlers = []
-        self.reload_feed_handlers()
-        self.reload_feed_data()
+        self.reload_feed()
 
     def _connect(self):
         """overrides Bot._connect()"""
@@ -61,38 +63,46 @@ class FeedBot(Bot):
             pass
 
     def _on_connected(self, c, e):
-        trace('Connected.')
+        self.spew('Connected.')
         try:
-            self.connection.join('#feedex')
-            for channel in self.autojoin_channels:
-                self.connection.join(channel.encode('utf-8'))
+            if DEBUG_MODE:
+                self.connection.join('#feedex')
+            else:
+                for channel in self.autojoin_channels:
+                    self.connection.join(channel.encode('utf-8'))
         except: #TODO: specify exception here
             pass
-        if self.initialized: return
-        if c != self.connection: return
+        if self.initialized:
+            return
+        if c != self.connection:
+            return
         self.ircobj.execute_delayed(0, self.iter_feed)
         self.ircobj.execute_delayed(0, self.send_buffer)
         self.initialized = True
 
     def _on_msg(self, c, e):
-        if c != self.connection: return
-
+        if c != self.connection:
+            return
+        if is_channel(e.target()):
+            return
+        source = e.source()
         argv = e.arguments()[0].decode('utf8', 'ignore').split(' ')
-#        if argv[0] == '@add':
-#            self.on_add(e.target(), argv)
+        if argv[0] == r'\reload':
+            self.reload_feed()
+            msg = 'Reload successful - %d feeds' % len(self.feeds)
+            self.connection.privmsg(source, msg) #FIXME
 
     @make_periodic(FREQUENT_FETCH_PERIOD)
     def frequent_fetch(self, uri):
         self.fetch_feed(uri)
         return
-        def foo(instance):
-            FeedBot.fetch_feed(instance, uri)
-        return make_periodic(FETCH_PERIOD)(foo)
 
     @make_periodic(FETCH_PERIOD)
     def iter_feed(self):
         if not self.feeds:
             return
+        if getattr(self, 'feed_iter', None) is None:
+            self.feed_iter = self.feeds.iterkeys()
         try:
             uri = self.feed_iter.next()
         except StopIteration:
@@ -106,11 +116,11 @@ class FeedBot(Bot):
         if uri in self.last_checked:
             reference_timestamp = self.last_checked[uri]
 
-        self.spew('Trying to fetch & parse %s' % uri)
+        #self.spew('Trying to fetch & parse %s' % uri)
         try:
             spam = parse_feed(uri)
         except TimedOutException:
-            trace('Timed out.')
+            self.spew('Timed out while parsing %s' % uri)
             return
         except LookupError:
             self.spew('Invalid character in %s' % uri)
@@ -123,10 +133,10 @@ class FeedBot(Bot):
         spam.entries.reverse()
         for entry in spam.entries:
             if not entry.get('updated_parsed', None):
-                trace('Erroneous feed at %s' % uri)
+                self.spew('Erroneous feed at %s' % uri)
                 return
             t = mktime(entry.updated_parsed)
-            if t > future:
+            if t > future: # 공지에 올려두려고 날짜를 미래로 해놓은 것들 무시
                 continue
             if t <= reference_timestamp:
                 continue
@@ -141,7 +151,7 @@ class FeedBot(Bot):
                 target, msg, opt = result
                 opt['uri'] = uri
                 opt['timestamp'] = t
-                opt['callback'] = [self.feed_callback]
+                opt['callback'] = [] #[self.feed_callback]
                 self.buffer.append((target, msg, opt))
 
         if timestamps:
@@ -149,7 +159,7 @@ class FeedBot(Bot):
             #self.save_timestamp(uri, max(timestamps))
             pass
 
-        self.spew('Completed processing %s.' % uri)
+        #self.spew('Completed processing %s.' % uri)
 
     @make_periodic(BUFFER_PERIOD)
     def send_buffer(self):
@@ -158,8 +168,11 @@ class FeedBot(Bot):
         self.buffer.sort(key=lambda _:_[2]['timestamp'])
         target, msg, opt = self.buffer[0]
         now = time.time()
-        if opt['timestamp'] > now: # 10 minutes
+        if opt['timestamp'] > now: # 미래에 보여줄 것은 미래까지 기다림
             return
+        if DEBUG_MODE:
+            msg = '%s %s' % (target, msg)
+            target = '#feedex'
         msg = force_unicode(msg)
         msg = msg.encode('utf8', 'xmlcharrefreplace')
         target = force_unicode(target).encode('utf8')
@@ -178,25 +191,16 @@ class FeedBot(Bot):
         finally:
             pass
         try:
-            if DEBUG_MODE:
+            if DEBUG_MODE or not self.initialized:
                 self.connection.privmsg('#feedex', msg.encode('utf-8'))
             else:
-                print msg.encode('utf-8')
+                print(msg.encode('utf-8'))
         except:
             return
 
     def feed_callback(self, target, msg, opt):
         self.spew('%s %s' % (target, msg))
         return
-
-        # should be called after the line is popped from self.buffer
-        if 'uri' not in opt: return
-        uri = opt['uri']
-        for t, m, o in self.buffer:
-            if 'uri' not in o: continue
-            if uri == o['uri']: return
-
-        self.save_timestamp(uri, self.timestamps_temp[uri])
 
     def load_timestamp(self, uri):
         now = time.time()
@@ -221,6 +225,11 @@ class FeedBot(Bot):
         f = open(path, 'w+')
         f.write(str(timestamp))
         f.close()
+
+    def reload_feed(self):
+        self.handlers = []
+        self.reload_feed_handlers()
+        self.reload_feed_data()
 
     def reload_feed_handlers(self):
         handler_names = []
@@ -252,6 +261,7 @@ class FeedBot(Bot):
                     fp.close()
 
     def reload_feed_data(self):
+        self.feed_iter = None
         self.feeds = defaultdict(list)
         for handler in self.handlers:
             uri_set = set()
@@ -266,8 +276,7 @@ class FeedBot(Bot):
                 for uri in uri_set:
                     pass
                     self.ircobj.execute_delayed(0, self.frequent_fetch, (uri,))
-            trace('%s loaded successfully.' % handler['__name__'])
-        self.feed_iter = self.feeds.iterkeys()
+            self.spew('%s loaded successfully.' % handler['__name__'])
 
 ####
 
@@ -280,3 +289,4 @@ if __name__ == '__main__':
             use_ssl=USE_SSL
             )
     bot.start()
+
