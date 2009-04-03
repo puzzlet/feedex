@@ -3,7 +3,7 @@
 import imp
 import os
 import datetime
-from time import time, mktime 
+import time
 try: # preparing for Python 3.0
     from urllib.parse import quote
 except ImportError:
@@ -11,12 +11,12 @@ except ImportError:
 from collections import defaultdict
 
 import feedparser
-from irclib import is_channel
+from irclib import is_channel, nm_to_n
 from ircbot import SingleServerIRCBot as Bot
 from ircbot import ServerConnectionError
 
 from util import *
-from config import *
+import config
 
 @timed_out(3)
 def parse_feed(*args, **kwargs):
@@ -31,6 +31,79 @@ def make_periodic(period):
                 self.ircobj.execute_delayed(period, new_f, (self,) + args)
         return new_f
     return decorator
+
+class FeedHandler:
+    def __init__(self, uri):
+        self.uri = uri
+        self.timestamp = 0
+        self.id_set = set() # {}
+        self.load_timestamp()
+
+    def load_timestamp(self):
+        now = time.time()
+        file_name = os.path.join(config.FEEDEX_ROOT, 'timestamps', quote(self.uri, ''))
+        if not os.access(file_name, os.F_OK):
+            self.last_updated = now
+            self.save_timestamp()
+            return
+        try:
+            f = open(file_name, 'r')
+            timestamp = float(f.next().strip())
+            for line in f:
+                id = line.strip()
+                if not id:
+                    continue
+                self.id_set.add(id)
+            f.close()
+            if timestamp > now: # + config.FUTURE_THRESHOLD:
+                self.last_updated = now
+                self.save_timestamp()
+                return
+            self.last_updated = timestamp
+        except:
+            pass
+
+    def save_timestamp(self):
+        path = os.path.join(config.FEEDEX_ROOT, 'timestamps', quote(self.uri, ''))
+        f = open(path, 'w+')
+        f.write(str(self.last_updated))
+        f.write('\n')
+        f.write('\n'.join([id for id in self.id_set]))
+        f.close()
+
+    def is_entry_fresh(self, entry):
+        if entry.get('updated_parsed', None):
+            t = time.mktime(entry.updated_parsed)
+            return t > self.last_updated
+        if entry.id in self.id_set:
+            return False
+        return True
+
+    def get_entries(self):
+        try:
+            feed = parse_feed(self.uri)
+        except TimedOutException:
+            trace('Timed out while parsing %s' % self.uri)
+            return []
+        except LookupError:
+            trace('Invalid character in %s' % self.uri)
+            return []
+        except UnicodeDecodeError:
+            trace('Invalid character in %s' % self.uri)
+            return []
+        fresh_entries = [entry for entry in feed.entries if self.is_entry_fresh(entry)]
+        max_timestamp = 0
+        for entry in fresh_entries:
+            if entry.get('id', None):
+                self.id_set.add(entry.id)
+            if entry.get('updated_parsed', None):
+                t = time.mktime(entry.updated_parsed)
+                if t > max_timestamp:
+                    max_timestamp = t
+            else:
+                max_timestamp = time.time()
+        self.save_timestamp()
+        return fresh_entries
 
 class FeedBot(Bot):
     def __init__(self, server_list, nick_list, realname, reconnection_interval=60, use_ssl=False):
@@ -65,7 +138,7 @@ class FeedBot(Bot):
     def _on_connected(self, c, e):
         self.spew('Connected.')
         try:
-            if DEBUG_MODE:
+            if config.DEBUG_MODE:
                 self.connection.join('#feedex')
             else:
                 for channel in self.autojoin_channels:
@@ -85,19 +158,19 @@ class FeedBot(Bot):
             return
         if is_channel(e.target()):
             return
-        source = e.source()
+        nickname = nm_to_n(e.source())
         argv = e.arguments()[0].decode('utf8', 'ignore').split(' ')
         if argv[0] == r'\reload':
             self.reload_feed()
             msg = 'Reload successful - %d feeds' % len(self.feeds)
-            self.connection.privmsg(source, msg) #FIXME
+            self.connection.privmsg(nickname, msg)
 
-    @make_periodic(FREQUENT_FETCH_PERIOD)
+    @make_periodic(config.FREQUENT_FETCH_PERIOD)
     def frequent_fetch(self, uri):
         self.fetch_feed(uri)
         return
 
-    @make_periodic(FETCH_PERIOD)
+    @make_periodic(config.FETCH_PERIOD)
     def iter_feed(self):
         if not self.feeds:
             return
@@ -112,36 +185,14 @@ class FeedBot(Bot):
 
     def fetch_feed(self, uri):
         timestamps = []
-        reference_timestamp = self.load_timestamp(uri)
-        if uri in self.last_checked:
-            reference_timestamp = self.last_checked[uri]
-
-        #self.spew('Trying to fetch & parse %s' % uri)
-        try:
-            spam = parse_feed(uri)
-        except TimedOutException:
-            self.spew('Timed out while parsing %s' % uri)
-            return
-        except LookupError:
-            self.spew('Invalid character in %s' % uri)
-            return
-        except UnicodeDecodeError:
-            self.spew('Invalid character in %s' % uri)
-            return
-
-        future = time.time() + FUTURE_THRESHOLD
-        spam.entries.reverse()
-        for entry in spam.entries:
-            if not entry.get('updated_parsed', None):
-                self.spew('Erroneous feed at %s' % uri)
-                return
-            t = mktime(entry.updated_parsed)
-            if t > future: # 공지에 올려두려고 날짜를 미래로 해놓은 것들 무시
-                continue
-            if t <= reference_timestamp:
-                continue
-            timestamps.append(t)
-            time_string = datetime.datetime.fromtimestamp(t, KoreanStandardTime()).isoformat(' ')
+        handler = FeedHandler(uri)
+        for entry in handler.get_entries():
+            if entry.get('updated_parsed', None):
+                t = time.mktime(entry.updated_parsed)
+                time_string = datetime.datetime.fromtimestamp(t, KoreanStandardTime()).isoformat(' ')
+            else:
+                t = time.time()
+                time_string = ''
             for x in self.feeds[uri]:
                 kwargs = dict(x['data'])
                 kwargs['time'] = time_string
@@ -154,14 +205,7 @@ class FeedBot(Bot):
                 opt['callback'] = [] #[self.feed_callback]
                 self.buffer.append((target, msg, opt))
 
-        if timestamps:
-            self.last_checked[uri] = max(timestamps)
-            #self.save_timestamp(uri, max(timestamps))
-            pass
-
-        #self.spew('Completed processing %s.' % uri)
-
-    @make_periodic(BUFFER_PERIOD)
+    @make_periodic(config.BUFFER_PERIOD)
     def send_buffer(self):
         if not self.buffer:
             return
@@ -170,7 +214,7 @@ class FeedBot(Bot):
         now = time.time()
         if opt['timestamp'] > now: # 미래에 보여줄 것은 미래까지 기다림
             return
-        if DEBUG_MODE:
+        if config.DEBUG_MODE:
             msg = '%s %s' % (target, msg)
             target = '#feedex'
         msg = force_unicode(msg)
@@ -191,7 +235,7 @@ class FeedBot(Bot):
         finally:
             pass
         try:
-            if DEBUG_MODE or not self.initialized:
+            if config.DEBUG_MODE:
                 self.connection.privmsg('#feedex', msg.encode('utf-8'))
             else:
                 print(msg.encode('utf-8'))
@@ -204,7 +248,7 @@ class FeedBot(Bot):
 
     def load_timestamp(self, uri):
         now = time.time()
-        file_name = os.path.join(FEEDEX_ROOT, 'timestamps', quote(uri, ''))
+        file_name = os.path.join(config.FEEDEX_ROOT, 'timestamps', quote(uri, ''))
         if not os.access(file_name, os.F_OK):
             self.save_timestamp(uri, now)
             return now
@@ -212,7 +256,7 @@ class FeedBot(Bot):
             f = open(file_name, 'r')
             result = float(f.read())
             f.close()
-            if result > now + FUTURE_THRESHOLD:
+            if result > now: # + config.FUTURE_THRESHOLD:
                 self.save_timestamp(uri, now)
                 return now
             return result
@@ -221,7 +265,7 @@ class FeedBot(Bot):
         return now
 
     def save_timestamp(self, uri, timestamp):
-        path = os.path.join(FEEDEX_ROOT, 'timestamps', quote(uri, ''))
+        path = os.path.join(config.FEEDEX_ROOT, 'timestamps', quote(uri, ''))
         f = open(path, 'w+')
         f.write(str(timestamp))
         f.close()
@@ -230,10 +274,13 @@ class FeedBot(Bot):
         self.handlers = []
         self.reload_feed_handlers()
         self.reload_feed_data()
+        if self.initialized:
+            for channel in self.autojoin_channels:
+                self.connection.join(channel.encode('utf-8'))
 
     def reload_feed_handlers(self):
         handler_names = []
-        import_path = os.path.join(FEEDEX_ROOT, 'feeds')
+        import_path = os.path.join(config.FEEDEX_ROOT, 'feeds')
         for x in os.listdir(import_path):
             if x.endswith('.py'):
                 handler_names.append(x[:-3])
@@ -270,7 +317,7 @@ class FeedBot(Bot):
                 self.feeds[uri].append({
                     'handler': handler,
                     'data': data,
-                    })
+                })
                 uri_set.add(uri)
             if handler['frequent']:
                 for uri in uri_set:
@@ -283,10 +330,10 @@ class FeedBot(Bot):
 if __name__ == '__main__':
     CHANNELS = ['#snucse-feed', '#snucse_18+']
     bot = FeedBot(
-            server_list=SERVER_LIST,
-            nick_list=NICKNAME_LIST,
+            server_list=config.SERVER_LIST,
+            nick_list=config.NICKNAME_LIST,
             realname='FeedEx the feed bot',
-            use_ssl=USE_SSL
+            use_ssl=config.USE_SSL
             )
     bot.start()
 

@@ -6,7 +6,7 @@ import chardet
 import datetime 
 
 def trace(str):
-    print '[%s] %s' % (time.strftime('%m %d %H:%M:%S'), str)
+    print('[%s] %s' % (time.strftime('%m %d %H:%M:%S'), str))
 
 class KoreanStandardTime(datetime.tzinfo):
     def utcoffset(self, dt):

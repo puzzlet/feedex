@@ -32,7 +32,7 @@ def parse(argv, format):
         'target': argv[1],
         'format': format[argv[2]],
         'uri': argv[3],
-        }
+    }
     return data['uri'], data
 
 def display(entry, data):
@@ -46,4 +46,4 @@ def display(entry, data):
 channels = set()
 for uri, data in load():
     channels.add(data['target'])
- 
+
