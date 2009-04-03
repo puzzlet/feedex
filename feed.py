@@ -68,18 +68,19 @@ class FeedHandler:
         f = open(path, 'w+')
         f.write(str(self.last_updated))
         f.write('\n')
-        f.write('\n'.join([id for id in self.id_set]))
+        f.write('\n'.join(self.id_set))
+        f.write('\n')
         f.close()
 
     def is_entry_fresh(self, entry):
         if entry.get('updated_parsed', None):
             t = time.mktime(entry.updated_parsed)
             return t > self.last_updated
-        if entry.id in self.id_set:
-            return False
-        return True
+        return entry.id not in self.id_set
 
     def get_entries(self):
+        if config.DEBUG_MODE:
+            trace(self.uri)
         try:
             feed = parse_feed(self.uri)
         except TimedOutException:
@@ -92,6 +93,8 @@ class FeedHandler:
             trace('Invalid character in %s' % self.uri)
             return []
         fresh_entries = [entry for entry in feed.entries if self.is_entry_fresh(entry)]
+        if not fresh_entries:
+            return []
         max_timestamp = 0
         for entry in fresh_entries:
             if entry.get('id', None):
@@ -102,6 +105,10 @@ class FeedHandler:
                     max_timestamp = t
             else:
                 max_timestamp = time.time()
+        if max_timestamp > self.last_updated:
+            self.last_updated = max_timestamp
+        if config.DEBUG_MODE:
+            trace((self.last_updated, self.id_set))
         self.save_timestamp()
         return fresh_entries
 
@@ -227,7 +234,6 @@ class FeedBot(Bot):
             return
         for f in opt.get('callback', {}):
             f(target, msg, opt)
-        self.save_timestamp(opt['uri'], now)
 
     def spew(self, msg):
         try:
@@ -245,30 +251,6 @@ class FeedBot(Bot):
     def feed_callback(self, target, msg, opt):
         self.spew('%s %s' % (target, msg))
         return
-
-    def load_timestamp(self, uri):
-        now = time.time()
-        file_name = os.path.join(config.FEEDEX_ROOT, 'timestamps', quote(uri, ''))
-        if not os.access(file_name, os.F_OK):
-            self.save_timestamp(uri, now)
-            return now
-        try:
-            f = open(file_name, 'r')
-            result = float(f.read())
-            f.close()
-            if result > now: # + config.FUTURE_THRESHOLD:
-                self.save_timestamp(uri, now)
-                return now
-            return result
-        except:
-            pass
-        return now
-
-    def save_timestamp(self, uri, timestamp):
-        path = os.path.join(config.FEEDEX_ROOT, 'timestamps', quote(uri, ''))
-        f = open(path, 'w+')
-        f.write(str(timestamp))
-        f.close()
 
     def reload_feed(self):
         self.handlers = []
@@ -323,7 +305,7 @@ class FeedBot(Bot):
                 for uri in uri_set:
                     pass
                     self.ircobj.execute_delayed(0, self.frequent_fetch, (uri,))
-            self.spew('%s loaded successfully.' % handler['__name__'])
+            trace('%s loaded successfully.' % handler['__name__'])
 
 ####
 
