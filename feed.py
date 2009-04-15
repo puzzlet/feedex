@@ -68,15 +68,19 @@ class FeedHandler:
         f = open(path, 'w+')
         f.write(str(self.last_updated))
         f.write('\n')
-        f.write('\n'.join(self.id_set))
+        f.write('\n'.join(self.id_set).encode('utf-8'))
         f.write('\n')
         f.close()
 
     def is_entry_fresh(self, entry):
         if entry.get('updated_parsed', None):
             t = time.mktime(entry.updated_parsed)
-            return t > self.last_updated
-        return entry.id not in self.id_set
+            return self.last_updated < t < time.time()
+        if entry.get('id', None):
+            return entry.id not in self.id_set
+        if entry.get('link', None):
+            return entry.link not in self.id_set
+        return True
 
     def get_entries(self):
         if config.DEBUG_MODE:
@@ -92,13 +96,16 @@ class FeedHandler:
         except UnicodeDecodeError:
             trace('Invalid character in %s' % self.uri)
             return []
+        feed.entries.reverse()
         fresh_entries = [entry for entry in feed.entries if self.is_entry_fresh(entry)]
         if not fresh_entries:
             return []
         max_timestamp = 0
-        for entry in fresh_entries:
-            if entry.get('id', None):
-                self.id_set.add(entry.id)
+        new_id_set = set() # {}
+        for entry in feed.entries:
+            key = entry.get('id', None) or entry.get('link', None)
+            if key:
+                new_id_set.add(key)
             if entry.get('updated_parsed', None):
                 t = time.mktime(entry.updated_parsed)
                 if t > max_timestamp:
@@ -107,6 +114,8 @@ class FeedHandler:
                 max_timestamp = time.time()
         if max_timestamp > self.last_updated:
             self.last_updated = max_timestamp
+        if new_id_set:
+            self.id_set = new_id_set
         if config.DEBUG_MODE:
             trace((self.last_updated, self.id_set))
         self.save_timestamp()
@@ -192,7 +201,7 @@ class FeedBot(Bot):
 
     def fetch_feed(self, uri):
         timestamps = []
-        handler = FeedHandler(uri)
+        handler = FeedHandler(str(uri))
         for entry in handler.get_entries():
             if entry.get('updated_parsed', None):
                 t = time.mktime(entry.updated_parsed)
@@ -258,7 +267,8 @@ class FeedBot(Bot):
         self.reload_feed_data()
         if self.initialized:
             for channel in self.autojoin_channels:
-                self.connection.join(channel.encode('utf-8'))
+                if channel not in self.channels:
+                    self.connection.join(channel.encode('utf-8'))
 
     def reload_feed_handlers(self):
         handler_names = []

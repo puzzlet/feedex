@@ -23,22 +23,24 @@ def load():
         if not line:
             continue
         tokens = re.split(r'\s+', line)
-        result.append(parse(tokens, format))
+        for item in parse(tokens, format):
+            result.append(item)
     return result
 
 def parse(argv, format):
-    data = {
-        'name': argv[0],
-        'target': argv[1],
-        'format': format[argv[2]],
-        'uri': argv[3],
-    }
-    return data['uri'], data
+    for target in argv[1].split(','):
+        data = {
+            'name': argv[0],
+            'target': target,
+            'format': format[argv[2]],
+            'uri': argv[3],
+        }
+        yield (data['uri'], data)
 
 def display(entry, data):
     kwargs = dict(data)
     kwargs['bold'] = '\x02'
-    kwargs['link'] = force_unicode(entry.link)
+    kwargs['link'] = force_unicode(entry.get('link', ''))
     kwargs['title'] = force_unicode(entry.title)
     msg = kwargs['format'] % kwargs
     return data['target'], msg, {}
