@@ -10,17 +10,12 @@ except ImportError:
     from urllib import quote
 from collections import defaultdict
 
-import feedparser
 from irclib import is_channel, nm_to_n
 from ircbot import SingleServerIRCBot as Bot
 from ircbot import ServerConnectionError
 
 from util import *
 import config
-
-@timed_out(3)
-def parse_feed(*args, **kwargs):
-    return feedparser.parse(*args, **kwargs)
 
 def make_periodic(period):
     def decorator(f):
@@ -31,95 +26,6 @@ def make_periodic(period):
                 self.ircobj.execute_delayed(period, new_f, (self,) + args)
         return new_f
     return decorator
-
-class FeedHandler:
-    def __init__(self, uri):
-        self.uri = uri
-        self.timestamp = 0
-        self.id_set = set() # {}
-        self.load_timestamp()
-
-    def load_timestamp(self):
-        now = time.time()
-        file_name = os.path.join(config.FEEDEX_ROOT, 'timestamps', quote(self.uri, ''))
-        if not os.access(file_name, os.F_OK):
-            self.last_updated = now
-            self.save_timestamp()
-            return
-        try:
-            f = open(file_name, 'r')
-            timestamp = float(f.next().strip())
-            for line in f:
-                id = line.strip()
-                if not id:
-                    continue
-                self.id_set.add(id)
-            f.close()
-            if timestamp > now: # + config.FUTURE_THRESHOLD:
-                self.last_updated = now
-                self.save_timestamp()
-                return
-            self.last_updated = timestamp
-        except:
-            pass
-
-    def save_timestamp(self):
-        path = os.path.join(config.FEEDEX_ROOT, 'timestamps', quote(self.uri, ''))
-        f = open(path, 'w+')
-        f.write(str(self.last_updated))
-        f.write('\n')
-        f.write('\n'.join(self.id_set).encode('utf-8'))
-        f.write('\n')
-        f.close()
-
-    def is_entry_fresh(self, entry):
-        if entry.get('updated_parsed', None):
-            t = time.mktime(entry.updated_parsed)
-            return self.last_updated < t < time.time()
-        if entry.get('id', None):
-            return entry.id not in self.id_set
-        if entry.get('link', None):
-            return entry.link not in self.id_set
-        return True
-
-    def get_entries(self):
-        if config.DEBUG_MODE:
-            trace(self.uri)
-        try:
-            feed = parse_feed(self.uri)
-        except TimedOutException:
-            trace('Timed out while parsing %s' % self.uri)
-            return []
-        except LookupError:
-            trace('Invalid character in %s' % self.uri)
-            return []
-        except UnicodeDecodeError:
-            trace('Invalid character in %s' % self.uri)
-            return []
-        feed.entries.reverse()
-        fresh_entries = [entry for entry in feed.entries if self.is_entry_fresh(entry)]
-        if not fresh_entries:
-            return []
-        max_timestamp = 0
-        new_id_set = set() # {}
-        for entry in feed.entries:
-            key = entry.get('id', None) or entry.get('link', None)
-            if key:
-                new_id_set.add(key)
-            if entry.get('updated_parsed', None):
-                t = time.mktime(entry.updated_parsed)
-                if t > max_timestamp:
-                    max_timestamp = t
-            else:
-                max_timestamp = time.time()
-        if max_timestamp > self.last_updated:
-            self.last_updated = max_timestamp
-        if new_id_set:
-            self.id_set = new_id_set
-        if config.DEBUG_MODE:
-            trace((self.last_updated, self.id_set))
-        self.save_timestamp()
-        return fresh_entries
 
 class FeedBot(Bot):
     def __init__(self, server_list, nick_list, realname, reconnection_interval=60, use_ssl=False):
@@ -182,8 +88,8 @@ class FeedBot(Bot):
             self.connection.privmsg(nickname, msg)
 
     @make_periodic(config.FREQUENT_FETCH_PERIOD)
-    def frequent_fetch(self, uri):
-        self.fetch_feed(uri)
+    def frequent_fetch(self, fetcher):
+        self.fetch_feed(fetcher)
         return
 
     @make_periodic(config.FETCH_PERIOD)
@@ -193,30 +99,29 @@ class FeedBot(Bot):
         if getattr(self, 'feed_iter', None) is None:
             self.feed_iter = self.feeds.iterkeys()
         try:
-            uri = self.feed_iter.next()
+            fetcher = self.feed_iter.next()
         except StopIteration:
             self.feed_iter = self.feeds.iterkeys()
-            uri = self.feed_iter.next()
-        self.fetch_feed(uri)
+            fetcher = self.feed_iter.next()
+        self.fetch_feed(fetcher)
 
-    def fetch_feed(self, uri):
+    def fetch_feed(self, fetcher):
         timestamps = []
-        handler = FeedHandler(str(uri))
-        for entry in handler.get_entries():
+        for entry in fetcher.get_entries():
             if entry.get('updated_parsed', None):
                 t = time.mktime(entry.updated_parsed)
                 time_string = datetime.datetime.fromtimestamp(t, KoreanStandardTime()).isoformat(' ')
             else:
                 t = time.time()
                 time_string = ''
-            for x in self.feeds[uri]:
+            for x in self.feeds[fetcher]:
                 kwargs = dict(x['data'])
                 kwargs['time'] = time_string
                 result = x['handler']['display'](entry, kwargs)
                 if not result:
                     continue
                 target, msg, opt = result
-                opt['uri'] = uri
+                opt['uri'] = fetcher.uri
                 opt['timestamp'] = t
                 opt['callback'] = [] #[self.feed_callback]
                 self.buffer.append((target, msg, opt))
@@ -303,18 +208,18 @@ class FeedBot(Bot):
         self.feed_iter = None
         self.feeds = defaultdict(list)
         for handler in self.handlers:
-            uri_set = set()
+            fetcher_set = set()
             data_list = handler['load']()
-            for uri, data in data_list:
-                self.feeds[uri].append({
+            for fetcher, data in data_list:
+                self.feeds[fetcher].append({
                     'handler': handler,
                     'data': data,
                 })
-                uri_set.add(uri)
+                fetcher_set.add(fetcher)
             if handler['frequent']:
-                for uri in uri_set:
+                for fetcher in fetcher_set:
                     pass
-                    self.ircobj.execute_delayed(0, self.frequent_fetch, (uri,))
+                    self.ircobj.execute_delayed(0, self.frequent_fetch, (fetcher,))
             trace('%s loaded successfully.' % handler['__name__'])
 
 ####
