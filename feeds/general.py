@@ -2,20 +2,14 @@
 import os.path
 import re
 import time
-from util import force_unicode, timed_out, trace
+from util import force_unicode, parse_feed, trace
 from util import TimedOutException
 try: # preparing for Python 3.0
     from urllib.parse import quote
 except ImportError:
     from urllib import quote
-import feedparser
 
 FILE_PATH = os.path.dirname(__file__)
-
-@timed_out(3)
-def parse_feed(*args, **kwargs):
-    #XXX need to cache the feeds and request with ETag, etc.
-    return feedparser.parse(*args, **kwargs)
 
 class FeedFetcher:
     def __init__(self, uri):
@@ -134,7 +128,7 @@ def parse(argv, format):
     for target in argv[1].split(','):
         data = {
             'name': argv[0],
-            'target': target,
+            'target': target.strip(),
             'format': format[argv[2]],
             'uri': argv[3],
         }

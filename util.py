@@ -5,6 +5,8 @@ import time
 import chardet
 import datetime 
 
+import feedparser
+
 def trace(str):
     print('[%s] %s' % (time.strftime('%m %d %H:%M:%S'), str))
 
@@ -55,6 +57,11 @@ def timed_out(timeout):
         return new_f
 
     return decorate
+
+@timed_out(3)
+def parse_feed(*args, **kwargs):
+    #XXX need to cache the feeds and request with ETag, etc.
+    return feedparser.parse(*args, **kwargs)
 
 def force_unicode(str, encoding=''):
     if type(str) == unicode:
