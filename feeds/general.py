@@ -2,6 +2,7 @@
 import os.path
 import re
 import time
+import calendar
 from util import force_unicode, parse_feed, trace
 from util import TimedOutException
 try: # preparing for Python 3.0
@@ -11,7 +12,7 @@ except ImportError:
 
 FILE_PATH = os.path.dirname(__file__)
 
-class FeedFetcher:
+class FeedFetcher(object):
     def __init__(self, uri):
         self.uri = uri
         self.timestamp = 0
@@ -59,7 +60,8 @@ class FeedFetcher:
 
     def is_entry_fresh(self, entry):
         if entry.get('updated_parsed', None):
-            t = time.mktime(entry.updated_parsed)
+            # assuming entry.updated_parsed is UTC:
+            t = calendar.timegm(entry.updated_parsed)
             return self.last_updated < t < time.time()
         if entry.get('id', None):
             return entry.id not in self.id_set
@@ -90,12 +92,13 @@ class FeedFetcher:
             if key:
                 new_id_set.add(key)
             if entry.get('updated_parsed', None):
-                t = time.mktime(entry.updated_parsed)
+                # assuming entry.updated_parsed is UTC
+                t = calendar.timegm(entry.updated_parsed)
                 if t > max_timestamp:
                     max_timestamp = t
             else:
                 max_timestamp = time.time()
-        if max_timestamp > self.last_updated:
+        if self.last_updated < max_timestamp:
             self.last_updated = max_timestamp
         if new_id_set:
             self.id_set = new_id_set

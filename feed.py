@@ -4,6 +4,7 @@ import imp
 import os
 import datetime
 import time
+import calendar
 try: # preparing for Python 3.0
     from urllib.parse import quote
 except ImportError:
@@ -39,6 +40,7 @@ class FeedBot(Bot):
         self.use_ssl = use_ssl
         self.last_checked = {}
         self.buffer = []
+        self.frequent_fetches = {}
 
         self.reload_feed()
 
@@ -107,13 +109,16 @@ class FeedBot(Bot):
 
     def fetch_feed(self, fetcher):
         timestamps = []
+        print fetcher.uri
         for entry in fetcher.get_entries():
             if entry.get('updated_parsed', None):
-                t = time.mktime(entry.updated_parsed)
-                time_string = datetime.datetime.fromtimestamp(t, KoreanStandardTime()).isoformat(' ')
+                # assuming entry.updated_parsed is UTC
+                t = calendar.timegm(entry.updated_parsed)
+                dt = datetime.datetime.fromtimestamp(t, KoreanStandardTime())
+                time_string = dt.isoformat(' ')
             else:
                 t = time.time()
-                time_string = ''
+                time_string = 'datetime unknown'
             for x in self.feeds[fetcher]:
                 kwargs = dict(x['data'])
                 kwargs['time'] = time_string
@@ -174,6 +179,9 @@ class FeedBot(Bot):
             for channel in self.autojoin_channels:
                 if channel not in self.channels:
                     self.connection.join(channel.encode('utf-8'))
+            for fetcher, enabled in self.frequent_fetches.iteritems():
+                self.ircobj.execute_delayed(0, self.frequent_fetch, (fetcher,))
+                self.frequent_fetches[fetcher] = True
 
     def reload_feed_handlers(self):
         handler_names = []
@@ -218,8 +226,7 @@ class FeedBot(Bot):
                 fetcher_set.add(fetcher)
             if handler['frequent']:
                 for fetcher in fetcher_set:
-                    pass
-                    self.ircobj.execute_delayed(0, self.frequent_fetch, (fetcher,))
+                    self.frequent_fetches[fetcher] = False
             trace('%s loaded successfully.' % handler['__name__'])
 
 ####
