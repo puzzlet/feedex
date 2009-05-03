@@ -1,6 +1,8 @@
+import os.path
+FEEDEX_ROOT = os.path.dirname(os.path.absname(__file__))
+
 NICKNAME_LIST = ['FedEx']
 DEBUG_MODE = True
-FEEDEX_ROOT = os.path.dirname(os.path.absname(__file__))
 
 SERVER_LIST = [
     ('irc.hanirc.org', 6665),
@@ -8,8 +10,8 @@ SERVER_LIST = [
 USE_SSL = False
 BUFFER_PERIOD = 1
 
-FETCH_PERIOD = 1
-FREQUENT_FETCH_PERIOD = 1
-
+FETCH_PERIOD = 3
+FREQUENT_FETCH_PERIOD = 20
 FUTURE_THRESHOLD = 86400
+TIMEZONE = 9
 

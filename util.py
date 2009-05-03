@@ -73,7 +73,3 @@ def force_unicode(str, encoding=''):
         return "?"
     return str.decode(encoding, 'ignore')
 
-def rotate_key(map):
-    while True:
-        for key in map.iterkeys():
-            yield key

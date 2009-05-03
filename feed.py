@@ -177,8 +177,9 @@ class FeedBot(Bot):
         self.reload_feed_data()
         if self.initialized:
             for channel in self.autojoin_channels:
+                channel = channel.encode('utf-8')
                 if channel not in self.channels:
-                    self.connection.join(channel.encode('utf-8'))
+                    self.connection.join(channel)
             for fetcher, enabled in self.frequent_fetches.iteritems():
                 self.ircobj.execute_delayed(0, self.frequent_fetch, (fetcher,))
                 self.frequent_fetches[fetcher] = True

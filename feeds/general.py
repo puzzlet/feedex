@@ -13,8 +13,9 @@ except ImportError:
 FILE_PATH = os.path.dirname(__file__)
 
 class FeedFetcher(object):
-    def __init__(self, uri):
-        self.uri = uri
+    def __init__(self, data):
+        self.uri = data['uri']
+        self.ignore_time = data['flag'].get('ignore_time', False)
         self.timestamp = 0
         self.id_set = set() # {}
         self.load_timestamp()
@@ -59,7 +60,7 @@ class FeedFetcher(object):
         f.close()
 
     def is_entry_fresh(self, entry):
-        if entry.get('updated_parsed', None):
+        if not self.ignore_time and entry.get('updated_parsed', None):
             # assuming entry.updated_parsed is UTC:
             t = calendar.timegm(entry.updated_parsed)
             return self.last_updated < t < time.time()
@@ -128,21 +129,30 @@ def load():
     return result
 
 def parse(argv, format):
+    flag = {}
+    for token in argv[2].split(','):
+        key, _, value = token.partition('=')
+        if _:
+            flag[key] = value
+        else:
+            flag[key] = True
+    if 'format' in flag:
+        flag['format'] = format[flag['format']]
     for target in argv[1].split(','):
         data = {
             'name': argv[0],
             'target': target.strip(),
-            'format': format[argv[2]],
+            'flag': flag,
             'uri': argv[3],
         }
-        yield (FeedFetcher(data['uri']), data)
+        yield (FeedFetcher(data), data)
 
 def display(entry, data):
     kwargs = dict(data)
     kwargs['bold'] = '\x02'
     kwargs['link'] = force_unicode(entry.get('link', ''))
     kwargs['title'] = force_unicode(entry.title)
-    msg = kwargs['format'] % kwargs
+    msg = kwargs['flag']['format'] % kwargs
     return data['target'], msg, {}
 
 channels = set()
