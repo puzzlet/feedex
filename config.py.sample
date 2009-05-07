@@ -1,5 +1,5 @@
 import os.path
-FEEDEX_ROOT = os.path.dirname(os.path.absname(__file__))
+FEEDEX_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 NICKNAME_LIST = ['FedEx']
 DEBUG_MODE = True

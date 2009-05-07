@@ -3,25 +3,24 @@ import os.path
 import re
 import time
 import calendar
+import datetime
 from util import force_unicode, parse_feed, trace
-from util import TimedOutException
+from util import TimedOutException, KoreanStandardTime
 try: # preparing for Python 3.0
     from urllib.parse import quote
 except ImportError:
     from urllib import quote
+from config import DEBUG_MODE
 
 FILE_PATH = os.path.dirname(__file__)
 
 class FeedFetcher(object):
-    def __init__(self, data):
-        self.uri = data['uri']
-        self.ignore_time = data['flag'].get('ignore_time', False)
+    def __init__(self, uri, ignore_time=False):
+        self.uri = uri
+        self.ignore_time = ignore_time
         self.timestamp = 0
         self.id_set = set() # {}
         self.load_timestamp()
-
-    def __hash__(self):
-        return self.uri.__hash__()
 
     def _get_timestamp_filename(self):
         return os.path.join(FILE_PATH, '../timestamps', quote(self.uri, ''))
@@ -50,7 +49,9 @@ class FeedFetcher(object):
         except:
             pass
 
-    def save_timestamp(self):
+    def save_timestamp(self, timestamp=None):
+        if timestamp is not None:
+            self.last_updated = timestamp
         file_name = self._get_timestamp_filename()
         f = open(file_name, 'w+')
         f.write(str(self.last_updated))
@@ -59,7 +60,25 @@ class FeedFetcher(object):
         f.write('\n')
         f.close()
 
+    def update_timestamp(self, entries, request_time=None):
+        if request_time is None:
+            request_time = time.time()
+        for entry in entries:
+            key = entry.get('id', None) or entry.get('link', None)
+            if key:
+                self.id_set.add(key)
+            if entry.get('updated_parsed', None) is None:
+                self.last_updated = request_time
+            else:
+                # assuming entry.updated_parsed is UTC
+                t = calendar.timegm(entry.updated_parsed)
+                if t > self.last_updated:
+                    self.last_updated = t
+        self.save_timestamp()
+
     def is_entry_fresh(self, entry):
+        if DEBUG_MODE:
+            return True
         if not self.ignore_time and entry.get('updated_parsed', None):
             # assuming entry.updated_parsed is UTC:
             t = calendar.timegm(entry.updated_parsed)
@@ -71,40 +90,54 @@ class FeedFetcher(object):
         return True
 
     def get_entries(self):
+        feed = None
+        fetch_time = time.time()
         try:
             feed = parse_feed(str(self.uri))
         except TimedOutException:
             trace('Timed out while parsing %s' % self.uri)
-            return []
         except LookupError:
             trace('Invalid character in %s' % self.uri)
-            return []
         except UnicodeDecodeError:
             trace('Invalid character in %s' % self.uri)
+        if feed is None:
             return []
         feed.entries.reverse()
         fresh_entries = [entry for entry in feed.entries if self.is_entry_fresh(entry)]
-        if not fresh_entries:
-            return []
-        max_timestamp = 0
-        new_id_set = set() # {}
-        for entry in feed.entries:
-            key = entry.get('id', None) or entry.get('link', None)
-            if key:
-                new_id_set.add(key)
-            if entry.get('updated_parsed', None):
-                # assuming entry.updated_parsed is UTC
-                t = calendar.timegm(entry.updated_parsed)
-                if t > max_timestamp:
-                    max_timestamp = t
-            else:
-                max_timestamp = time.time()
-        if self.last_updated < max_timestamp:
-            self.last_updated = max_timestamp
-        if new_id_set:
-            self.id_set = new_id_set
-        self.save_timestamp()
+        self.update_timestamp(fresh_entries, fetch_time)
         return fresh_entries
+
+class EntryFormatter(object):
+    def __init__(self, target, format, options={}):
+        self.target = force_unicode(target)
+        self.format = force_unicode(format)
+        self.options = options
+
+    def format_entry(self, entry):
+        if entry.get('updated_parsed', None) is None:
+            t = time.time()
+            time_string = 'datetime unknown'
+        else:
+            # assuming entry.updated_parsed is UTC
+            t = calendar.timegm(entry.updated_parsed)
+            #XXX timezone should be customizable
+            dt = datetime.datetime.fromtimestamp(t, KoreanStandardTime())
+            time_string = dt.isoformat(' ')
+        kwargs = self.options
+        kwargs['bold'] = '\x02'
+        kwargs['link'] = force_unicode(entry.get('link', ''))
+        kwargs['time'] = time_string
+        kwargs['title'] = force_unicode(entry.title)
+        opt = {
+            'timestamp': t
+        }
+        return (self.target, self.format % kwargs, opt)
+
+    def format_entries(self, entries):
+        for entry in entries:
+            result = self.format_entry(entry)
+            if result:
+                yield result
 
 def load():
     format = {}
@@ -117,6 +150,7 @@ def load():
         tokens = re.split(r'\s\s+', line, 1)
         format[tokens[0]] = tokens[1]
     result = []
+    fetcher = {}
     for line in open(os.path.join(FILE_PATH, 'general.data'), 'r'):
         line = line.strip().decode('utf-8')
         if line.startswith('#'):
@@ -124,38 +158,46 @@ def load():
         if not line:
             continue
         tokens = re.split(r'\s\s+', line)
-        for item in parse(tokens, format):
-            result.append(item)
+        for uri, flag_string, formatter in parse(tokens, format):
+            if (uri, flag_string) not in fetcher:
+                flag = parse_flag_string(flag_string)
+                fetcher[(uri, flag_string)] = FeedFetcher(
+                    uri = uri,
+                    ignore_time = flag.get('ignore_time', False)
+                )
+            result.append((fetcher[(uri, flag_string)], formatter))
+    return result
+
+def parse_flag_string(s):
+    result = {}
+    for token in s.split(','):
+        key, _, value = token.partition('=')
+        if _:
+            result[key] = value
+        else:
+            result[key] = True
     return result
 
 def parse(argv, format):
-    flag = {}
-    for token in argv[2].split(','):
-        key, _, value = token.partition('=')
-        if _:
-            flag[key] = value
-        else:
-            flag[key] = True
+    flag = parse_flag_string(argv[2])
     if 'format' in flag:
         flag['format'] = format[flag['format']]
+    flag_string = []
+    for key, value in sorted(flag.items()):
+        if key == 'format':
+            continue
+        flag_string.append('%s=%s' % (key, value))
+    flag_string = ','.join(flag_string)
     for target in argv[1].split(','):
-        data = {
-            'name': argv[0],
-            'target': target.strip(),
-            'flag': flag,
-            'uri': argv[3],
-        }
-        yield (FeedFetcher(data), data)
+        formatter = EntryFormatter(
+            target=target.strip(),
+            format=flag['format'],
+            options={'name': argv[0]}
+        )
+        yield (argv[3], flag_string, formatter)
 
-def display(entry, data):
-    kwargs = dict(data)
-    kwargs['bold'] = '\x02'
-    kwargs['link'] = force_unicode(entry.get('link', ''))
-    kwargs['title'] = force_unicode(entry.title)
-    msg = kwargs['flag']['format'] % kwargs
-    return data['target'], msg, {}
 
 channels = set()
-for uri, data in load():
-    channels.add(data['target'])
+for fetcher, formatter in load():
+    channels.add(formatter.target)
 

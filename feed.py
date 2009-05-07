@@ -5,7 +5,8 @@ import os
 import datetime
 import time
 import calendar
-try: # preparing for Python 3.0
+try:
+    # for python 3.0
     from urllib.parse import quote
 except ImportError:
     from urllib import quote
@@ -109,36 +110,24 @@ class FeedBot(Bot):
 
     def fetch_feed(self, fetcher):
         timestamps = []
-        print fetcher.uri
-        for entry in fetcher.get_entries():
-            if entry.get('updated_parsed', None):
-                # assuming entry.updated_parsed is UTC
-                t = calendar.timegm(entry.updated_parsed)
-                dt = datetime.datetime.fromtimestamp(t, KoreanStandardTime())
-                time_string = dt.isoformat(' ')
-            else:
-                t = time.time()
-                time_string = 'datetime unknown'
-            for x in self.feeds[fetcher]:
-                kwargs = dict(x['data'])
-                kwargs['time'] = time_string
-                result = x['handler']['display'](entry, kwargs)
-                if not result:
-                    continue
-                target, msg, opt = result
-                opt['uri'] = fetcher.uri
-                opt['timestamp'] = t
-                opt['callback'] = [] #[self.feed_callback]
+        if config.DEBUG_MODE:
+            print fetcher.uri
+        entries = fetcher.get_entries()
+        for formatter in self.feeds[fetcher]:
+            for data in formatter.format_entries(entries):
+                target, msg, opt = data
+                print data
                 self.buffer.append((target, msg, opt))
 
     @make_periodic(config.BUFFER_PERIOD)
     def send_buffer(self):
         if not self.buffer:
             return
-        self.buffer.sort(key=lambda _:_[2]['timestamp'])
+        self.buffer.sort(key=lambda _:_[2].get('timestamp', 0))
         target, msg, opt = self.buffer[0]
         now = time.time()
-        if opt['timestamp'] > now: # 미래에 보여줄 것은 미래까지 기다림
+        # 미래에 보여줄 것은 미래까지 기다림
+        if opt.get('timestamp', now+1) > now:
             return
         if config.DEBUG_MODE:
             msg = '%s %s' % (target, msg)
@@ -151,8 +140,6 @@ class FeedBot(Bot):
             self.buffer.pop(0)
         except:
             return
-        for f in opt.get('callback', {}):
-            f(target, msg, opt)
 
     def spew(self, msg):
         try:
@@ -166,10 +153,6 @@ class FeedBot(Bot):
                 print(msg.encode('utf-8'))
         except:
             return
-
-    def feed_callback(self, target, msg, opt):
-        self.spew('%s %s' % (target, msg))
-        return
 
     def reload_feed(self):
         self.handlers = []
@@ -202,7 +185,6 @@ class FeedBot(Bot):
                 self.handlers.append({
                     '__name__': handler_name,
                     'load': m.load,
-                    'display': m.display,
                     'channels': m.channels,
                     'frequent': getattr(m, 'frequent', False),
                     })
@@ -219,11 +201,8 @@ class FeedBot(Bot):
         for handler in self.handlers:
             fetcher_set = set()
             data_list = handler['load']()
-            for fetcher, data in data_list:
-                self.feeds[fetcher].append({
-                    'handler': handler,
-                    'data': data,
-                })
+            for fetcher, formatter in data_list:
+                self.feeds[fetcher].append(formatter)
                 fetcher_set.add(fetcher)
             if handler['frequent']:
                 for fetcher in fetcher_set:

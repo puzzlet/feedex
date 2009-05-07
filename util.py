@@ -26,7 +26,7 @@ class TimedOutException(Exception):
     def __str__(self):
         return repr(self.value)
 
-def timed_out(timeout):
+def limit_time(timeout):
     # from http://aspn.activestate.com/ASPN/Cookbook/Python/Recipe/307871
     def decorate(f):
         if 'SIGALRM' not in dir(signal):
@@ -58,7 +58,7 @@ def timed_out(timeout):
 
     return decorate
 
-@timed_out(3)
+@limit_time(3.0)
 def parse_feed(*args, **kwargs):
     #XXX need to cache the feeds and request with ETag, etc.
     return feedparser.parse(*args, **kwargs)
