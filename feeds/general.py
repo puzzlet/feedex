@@ -4,6 +4,7 @@ import re
 import time
 import calendar
 import datetime
+import itertools
 from util import force_unicode, parse_feed, trace
 from util import TimedOutException, KoreanStandardTime
 try: # preparing for Python 3.0

@@ -5,6 +5,7 @@ import os
 import datetime
 import time
 import calendar
+import itertools
 try:
     # for python 3.0
     from urllib.parse import quote
@@ -16,10 +17,10 @@ from irclib import is_channel, nm_to_n
 from ircbot import SingleServerIRCBot as Bot
 from ircbot import ServerConnectionError
 
-from util import *
+from util import trace, parse_feed, force_unicode
 import config
 
-def make_periodic(period):
+def periodic(period):
     def decorator(f):
         def new_f(self, *args):
             try:
@@ -90,17 +91,18 @@ class FeedBot(Bot):
             msg = 'Reload successful - %d feeds' % len(self.feeds)
             self.connection.privmsg(nickname, msg)
 
-    @make_periodic(config.FREQUENT_FETCH_PERIOD)
+    @periodic(config.FREQUENT_FETCH_PERIOD)
     def frequent_fetch(self, fetcher):
         self.fetch_feed(fetcher)
         return
 
-    @make_periodic(config.FETCH_PERIOD)
+    @periodic(config.FETCH_PERIOD)
     def iter_feed(self):
         if not self.feeds:
             return
         if getattr(self, 'feed_iter', None) is None:
-            self.feed_iter = self.feeds.iterkeys()
+            self.feed_iter = itertools.cycle(self.feeds)
+            # TODO: RuntimeError: dictionary changed size during iteration
         try:
             fetcher = self.feed_iter.next()
         except StopIteration:
@@ -119,7 +121,7 @@ class FeedBot(Bot):
                 print data
                 self.buffer.append((target, msg, opt))
 
-    @make_periodic(config.BUFFER_PERIOD)
+    @periodic(config.BUFFER_PERIOD)
     def send_buffer(self):
         if not self.buffer:
             return
@@ -127,7 +129,7 @@ class FeedBot(Bot):
         target, msg, opt = self.buffer[0]
         now = time.time()
         # 미래에 보여줄 것은 미래까지 기다림
-        if opt.get('timestamp', now+1) > now:
+        if opt.get('timestamp', now-1) > now:
             return
         if config.DEBUG_MODE:
             msg = '%s %s' % (target, msg)

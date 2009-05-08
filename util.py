@@ -38,7 +38,7 @@ def limit_time(timeout):
         
         def new_f(*args, **kwargs):
             old = signal.signal(signal.SIGALRM, handler)
-            signal.alarm(timeout)
+            signal.alarm(int(timeout))
             e = None
             try:
                 result = f(*args, **kwargs)
@@ -58,7 +58,7 @@ def limit_time(timeout):
 
     return decorate
 
-@limit_time(3.0)
+@limit_time(3)
 def parse_feed(*args, **kwargs):
     #XXX need to cache the feeds and request with ETag, etc.
     return feedparser.parse(*args, **kwargs)
