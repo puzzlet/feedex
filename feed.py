@@ -17,7 +17,7 @@ from irclib import is_channel, nm_to_n
 from ircbot import SingleServerIRCBot as Bot
 from ircbot import ServerConnectionError
 
-from util import trace, parse_feed, force_unicode
+from util import trace, force_unicode
 import config
 
 def periodic(period):
@@ -76,7 +76,7 @@ class FeedBot(Bot):
         if c != self.connection:
             return
         self.ircobj.execute_delayed(0, self.iter_feed)
-        self.ircobj.execute_delayed(0, self.send_buffer)
+        self.ircobj.execute_delayed(config.BUFFER_PERIOD, self.send_buffer)
         self.initialized = True
 
     def _on_msg(self, c, e):
@@ -102,10 +102,13 @@ class FeedBot(Bot):
             return
         if getattr(self, 'feed_iter', None) is None:
             self.feed_iter = itertools.cycle(self.feeds)
-            # TODO: RuntimeError: dictionary changed size during iteration
         try:
             fetcher = self.feed_iter.next()
         except StopIteration:
+            self.feed_iter = self.feeds.iterkeys()
+            fetcher = self.feed_iter.next()
+        except RuntimeError:
+            # RuntimeError: dictionary changed size during iteration
             self.feed_iter = self.feeds.iterkeys()
             fetcher = self.feed_iter.next()
         self.fetch_feed(fetcher)
