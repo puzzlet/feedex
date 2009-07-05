@@ -190,10 +190,8 @@ class FeedBot(Bot):
                 self.handlers.append({
                     '__name__': handler_name,
                     'load': m.load,
-                    'channels': m.channels,
                     'frequent': getattr(m, 'frequent', False),
                     })
-                self.autojoin_channels.update(m.channels)
             except AttributeError:
                 continue
             finally:
@@ -209,6 +207,7 @@ class FeedBot(Bot):
             for fetcher, formatter in data_list:
                 self.feeds[fetcher].append(formatter)
                 fetcher_set.add(fetcher)
+                self.autojoin_channels.update(formatter.target)
             if handler['frequent']:
                 for fetcher in fetcher_set:
                     self.frequent_fetches[fetcher] = False
