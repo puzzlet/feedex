@@ -89,7 +89,7 @@ class FeedFetcher(object):
                 entry_data['title'] = entry['title']
             if entry.has_key('link'):
                 entry_data['link'] = entry['link']
-            if entry.has_key('updated_parsed'):
+            if entry.get('updated_parsed', None):
                 entry_data['updated'] = email.utils.formatdate(calendar.timegm(entry['updated_parsed']))
             data['entries'].append(entry_data)
         yml = yaml.dump(data, default_flow_style=False, encoding='utf-8', allow_unicode=True)
@@ -198,7 +198,7 @@ class EntryFormatter(object):
             # XXX timezone should be customizable
             dt = datetime.datetime.fromtimestamp(t, KoreanStandardTime())
             result['time'] = dt.isoformat(' ')
-        result['title'] = force_unicode(entry['title'])
+        result['title'] = force_unicode(entry['title']).replace(u'\n', ' ')
         return result
 
 def load_formats():

@@ -1,11 +1,13 @@
 #!/usr/bin/env python
 # -*- encoding: utf-8 -*-
-import imp
 import os
+import sys
+import imp
 import datetime
 import time
 import calendar
 import itertools
+import traceback
 try:
     # for python 3.0
     from urllib.parse import quote
@@ -184,6 +186,7 @@ class FeedBot(Bot):
             try:
                 fp, filename, opt = imp.find_module(handler_name, [import_path])
             except ImportError:
+                traceback.print_exception(*sys.exc_info())
                 continue
             try:
                 m = imp.load_module(handler_name, fp, filename, opt)
@@ -193,6 +196,7 @@ class FeedBot(Bot):
                     'frequent': getattr(m, 'frequent', False),
                     })
             except AttributeError:
+                traceback.print_exception(*sys.exc_info())
                 continue
             finally:
                 if fp:
@@ -207,7 +211,7 @@ class FeedBot(Bot):
             for fetcher, formatter in data_list:
                 self.feeds[fetcher].append(formatter)
                 fetcher_set.add(fetcher)
-                self.autojoin_channels.update(formatter.target)
+                self.autojoin_channels.add(formatter.target)
             if handler['frequent']:
                 for fetcher in fetcher_set:
                     self.frequent_fetches[fetcher] = False
