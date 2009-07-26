@@ -10,6 +10,7 @@ try: # preparing for Python 3.0
     from urllib.parse import quote
 except ImportError:
     from urllib import quote
+import traceback
 import urllib
 import yaml
 import email.utils
@@ -22,9 +23,10 @@ from util import TimedOutException, KoreanStandardTime
 FILE_PATH = os.path.dirname(__file__)
 
 class FeedFetcher(object):
-    def __init__(self, uri, ignore_time=False):
+    def __init__(self, uri, ignore_time=False, frequent=False):
         self.uri = str(uri)
         self.ignore_time = ignore_time
+        self.frequent = frequent
         self.etag = ''
         self.last_modified = 0
         self.last_confirmed = 0
@@ -112,8 +114,6 @@ class FeedFetcher(object):
     def is_entry_fresh(self, entry):
         if not self.initialized:
             self.load_cache()
-        if config.DEBUG_MODE:
-            return True
         if not self.ignore_time and entry.get('updated_parsed', None):
             # assuming entry.updated_parsed is UTC:
             t = calendar.timegm(entry.get('updated_parsed', 0))
@@ -201,64 +201,67 @@ class EntryFormatter(object):
         result['title'] = force_unicode(entry['title']).replace(u'\n', ' ')
         return result
 
-def load_formats():
-    result = {}
-    for line in open(os.path.join(FILE_PATH, 'format'), 'r'):
-        line = line.strip().decode('utf-8')
-        if line.startswith('#'):
-            continue
-        if ' ' not in line:
-            continue
-        tokens = re.split(r'\s\s+', line, 1)
-        result[tokens[0]] = tokens[1]
-    return result
+class FeedManager(object):
+    def __init__(self, file_path, fetcher_class=FeedFetcher, formatter_class=EntryFormatter):
+        self.file_path = os.path.join(FILE_PATH, file_path)
+        self.fetcher_class = fetcher_class
+        self.formatter_class = formatter_class
 
-def load():
-    format = load_formats()
-    result = []
-    fetcher = {}
-    for uri, flag_string, formatter in parse('general.data', format):
-        if (uri, flag_string) not in fetcher:
-            flag = parse_flag_string(flag_string)
-            fetcher[(uri, flag_string)] = FeedFetcher(
-                uri = uri,
-                ignore_time = flag.get('ignore_time', False)
-            )
-        result.append((fetcher[(uri, flag_string)], formatter))
-    return result
+    def load(self):
+        fetcher = {}
+        format = self.load_formats()
+        for token in self.parse(self.file_path):
+            name, targets, flag_string, uri = token
+            flag = self.parse_flag_string(flag_string)
+            if 'format' in flag:
+                flag['format'] = format[flag['format']]
+            flag_string = self.build_flag_string(flag)
+            if (uri, flag_string) not in fetcher:
+                fetcher[(uri, flag_string)] = self.fetcher_class(
+                    uri = uri,
+                    ignore_time = flag.get('ignore_time', False),
+                    frequent = flag.get('frequent', False)
+                )
+            for target in targets.split(','):
+                formatter = self.formatter_class(
+                    target=target.strip(),
+                    format=flag['format'],
+                    options={'name': name}
+                )
+                yield (fetcher[(uri, flag_string)], formatter)
 
-def parse_flag_string(s):
-    result = {}
-    for token in s.split(','):
-        key, _, value = token.partition('=')
-        if _:
-            result[key] = value
-        else:
-            result[key] = True
-    return result
+    def load_formats(self):
+        result = {}
+        for token in self.parse(os.path.join(FILE_PATH, 'format')):
+            result[token[0]] = token[1]
+        return result
 
-def parse(file_name, format):
-    for line in open(os.path.join(FILE_PATH, file_name), 'r'):
-        line = line.strip().decode('utf-8')
-        if not line:
-            continue
-        if line.startswith('#'):
-            continue
-        argv = re.split(r'\s\s+', line)
-        flag = parse_flag_string(argv[2])
-        if 'format' in flag:
-            flag['format'] = format[flag['format']]
-        flag_string = []
-        for key, value in sorted(flag.items()):
-            if key == 'format':
+    def parse(self, file_path):
+        for line in open(file_path, 'r'):
+            line = line.strip().decode('utf-8')
+            if not line:
                 continue
-            flag_string.append('%s=%s' % (key, value))
-        flag_string = ','.join(flag_string)
-        for target in argv[1].split(','):
-            formatter = EntryFormatter(
-                target=target.strip(),
-                format=flag['format'],
-                options={'name': argv[0]}
-            )
-            yield (argv[3], flag_string, formatter)
+            if line.startswith('#'):
+                continue
+            yield re.split(r'\s\s+|\t', line)
+
+    def parse_flag_string(self, s):
+        result = {}
+        for token in s.split(','):
+            key, _, value = token.partition('=')
+            if _:
+                result[key] = value
+            else:
+                result[key] = True
+        return result
+
+    def build_flag_string(self, d):
+        result = []
+        for key, value in sorted(d.items()):
+            if key =='format':
+                continue
+            result.append('%s=%s' % (key, value))
+        return ','.join(result)
+
+manager = FeedManager('general.data')
 

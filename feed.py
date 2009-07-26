@@ -178,7 +178,7 @@ class FeedBot(Bot):
         handler_names = []
         import_path = os.path.join(config.FEEDEX_ROOT, 'feeds')
         for x in os.listdir(import_path):
-            if x.endswith('.py'):
+            if x.endswith('.py') and not x.startswith('__'):
                 handler_names.append(x[:-3])
         self.handlers = []
         self.autjoin_channels = set()
@@ -192,9 +192,8 @@ class FeedBot(Bot):
                 m = imp.load_module(handler_name, fp, filename, opt)
                 self.handlers.append({
                     '__name__': handler_name,
-                    'load': m.load,
-                    'frequent': getattr(m, 'frequent', False),
-                    })
+                    'manager': m.manager,
+                })
             except AttributeError:
                 traceback.print_exception(*sys.exc_info())
                 continue
@@ -206,14 +205,11 @@ class FeedBot(Bot):
         self.feed_iter = None
         self.feeds = defaultdict(list)
         for handler in self.handlers:
-            fetcher_set = set()
-            data_list = handler['load']()
-            for fetcher, formatter in data_list:
+            manager = handler['manager']
+            for fetcher, formatter in manager.load():
                 self.feeds[fetcher].append(formatter)
-                fetcher_set.add(fetcher)
                 self.autojoin_channels.add(formatter.target)
-            if handler['frequent']:
-                for fetcher in fetcher_set:
+                if fetcher.frequent:
                     self.frequent_fetches[fetcher] = False
             trace('%s loaded successfully.' % handler['__name__'])
 
