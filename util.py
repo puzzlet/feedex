@@ -4,6 +4,8 @@ import signal
 import time
 import chardet
 import datetime 
+import email.utils
+import calendar
 
 import feedparser
 
@@ -58,11 +60,6 @@ def limit_time(timeout):
 
     return decorate
 
-@limit_time(3)
-def parse_feed(*args, **kwargs):
-    #XXX need to cache the feeds and request with ETag, etc.
-    return feedparser.parse(*args, **kwargs)
-
 def force_unicode(str, encoding=''):
     if type(str) == unicode:
         return str
@@ -72,4 +69,13 @@ def force_unicode(str, encoding=''):
         print "Cannot find encoding for %s" % repr(str)
         return "?"
     return str.decode(encoding, 'ignore')
+
+def rfc2timestamp(rfc, default=0):
+    if rfc:
+        return calendar.timegm(email.utils.parsedate(rfc))
+    else:
+        return default
+
+def tuple2rfc(timestamp):
+    return email.utils.formatdate(calendar.timegm(timestamp))
 

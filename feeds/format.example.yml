@@ -1,0 +1,4 @@
+default:       "[%(name)s] \x02%(title)s\x02 (%(time)s) %(link)s"
+#plain         [%(name)s] \x02%(link)s\x02 [%(title)s] (%(time)s)
+title_time:    "[%(name)s] %(title)s (%(time)s)"
+title_only:    "%(title)s"

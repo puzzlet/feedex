@@ -23,18 +23,25 @@ from util import trace, force_unicode
 import config
 
 def periodic(period):
+    """Decorate a class instance method so that the method would be
+    periodically executed by irclib framework.
+    """
     def decorator(f):
         def new_f(self, *args):
             try:
                 f(self, *args)
+            except StopIteration:
+                return
             finally:
                 self.ircobj.execute_delayed(period, new_f, (self,) + args)
         return new_f
     return decorator
 
 class FeedBot(Bot):
-    def __init__(self, server_list, nick_list, realname, reconnection_interval=60, use_ssl=False):
-        Bot.__init__(self, server_list, nick_list[0], realname, reconnection_interval)
+    def __init__(self, server_list, nick_list, realname,
+                 reconnection_interval=60, use_ssl=False):
+        Bot.__init__(self, server_list, nick_list[0], realname,
+                     reconnection_interval, use_ssl)
         self.initialized = False
         self.connection.add_global_handler('welcome', self._on_connected)
         self.connection.add_global_handler('privmsg', self._on_msg, 0)
@@ -48,29 +55,11 @@ class FeedBot(Bot):
 
         self.reload_feed()
 
-    def _connect(self):
-        """overrides Bot._connect()"""
-        password = None
-        if len(self.server_list[0]) > 2:
-            password = self.server_list[0][2]
-        try:
-            self.connect(self.server_list[0][0],
-                         self.server_list[0][1],
-                         self._nickname,
-                         password,
-                         ircname=self._realname,
-                         ssl=self.use_ssl)
-        except ServerConnectionError:
-            pass
-
     def _on_connected(self, c, e):
-        self.spew('Connected.')
+        trace('Connected.')
         try:
-            if config.DEBUG_MODE:
-                self.connection.join('#feedex')
-            else:
-                for channel in self.autojoin_channels:
-                    self.connection.join(channel.encode('utf-8'))
+            for channel in self.autojoin_channels:
+                self.connection.join(channel.encode('utf-8'))
         except: #TODO: specify exception here
             pass
         if self.initialized:
@@ -95,8 +84,11 @@ class FeedBot(Bot):
 
     @periodic(config.FREQUENT_FETCH_PERIOD)
     def frequent_fetch(self, fetcher):
+        if fetcher not in self.frequent_fetches:
+            raise StopIteration()
+        if not self.frequent_fetches[fetcher]:
+            raise StopIteration()
         self.fetch_feed(fetcher)
-        return
 
     @periodic(config.FETCH_PERIOD)
     def iter_feed(self):
@@ -118,13 +110,18 @@ class FeedBot(Bot):
     def fetch_feed(self, fetcher):
         timestamps = []
         if config.DEBUG_MODE:
-            print fetcher.uri
-        entries = fetcher.get_entries()
+            trace('Trying to parse from %s' % fetcher.uri)
+        try:
+            entries = fetcher.get_entries()
+        except:
+            traceback.print_exc()
+            return
         for formatter in self.feeds[fetcher]:
-            for data in formatter.format_entries(entries):
-                target, msg, opt = data
-                print data
-                self.buffer.append((target, msg, opt))
+            try:
+                for target, msg, opt in formatter.format_entries(entries):
+                    self.buffer.append((target, msg, opt))
+            except:
+                traceback.print_exc()
 
     @periodic(config.BUFFER_PERIOD)
     def send_buffer(self):
@@ -133,32 +130,21 @@ class FeedBot(Bot):
         self.buffer.sort(key=lambda _:_[2].get('timestamp', 0))
         target, msg, opt = self.buffer[0]
         now = time.time()
+        trace('%d messages in buffer' % len(self.buffer))
         # 미래에 보여줄 것은 미래까지 기다림
         if opt.get('timestamp', now-1) > now:
             return
-        if config.DEBUG_MODE:
-            msg = '%s %s' % (target, msg)
-            target = '#feedex'
+        print self.buffer[0]
         msg = force_unicode(msg)
         msg = msg.encode('utf8', 'xmlcharrefreplace')
         target = force_unicode(target).encode('utf8')
         try:
+            if target.startswith('#') and target not in self.channels:
+                self.connection.join(target)
             self.connection.privmsg(target, msg)
             self.buffer.pop(0)
         except:
-            return
-
-    def spew(self, msg):
-        try:
-            msg = force_unicode(msg)
-        finally:
-            pass
-        try:
-            if config.DEBUG_MODE:
-                self.connection.privmsg('#feedex', msg.encode('utf-8'))
-            else:
-                print(msg.encode('utf-8'))
-        except:
+            trace('Failed to send "%s" to %s' % (msg, target))
             return
 
     def reload_feed(self):
@@ -194,8 +180,8 @@ class FeedBot(Bot):
                     '__name__': handler_name,
                     'manager': m.manager,
                 })
-            except AttributeError:
-                traceback.print_exception(*sys.exc_info())
+            except Exception:
+                traceback.print_exc()
                 continue
             finally:
                 if fp:
@@ -204,14 +190,26 @@ class FeedBot(Bot):
     def reload_feed_data(self):
         self.feed_iter = None
         self.feeds = defaultdict(list)
+        self.autojoin_channels = set()
+        self.frequent_fetches = {}
         for handler in self.handlers:
             manager = handler['manager']
-            for fetcher, formatter in manager.load():
-                self.feeds[fetcher].append(formatter)
-                self.autojoin_channels.add(formatter.target)
-                if fetcher.frequent:
-                    self.frequent_fetches[fetcher] = False
+            try:
+                for fetcher, formatter in manager.load():
+                    self.feeds[fetcher].append(formatter)
+                    self.autojoin_channels.add(formatter.target)
+                    if fetcher.frequent:
+                        self.frequent_fetches[fetcher] = False
+            except:
+                traceback.print_exc()
+                continue
             trace('%s loaded successfully.' % handler['__name__'])
+        if config.DEBUG_MODE:
+            trace(self.autojoin_channels)
+        for channel in self.channels:
+            channel = force_unicode(channel)
+            if channel not in self.autojoin_channels:
+                self.connection.part(channel.encode('utf-8'))
 
 ####
 

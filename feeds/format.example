@@ -1,6 +1,0 @@
-default       [%(name)s] %(bold)s%(title)s%(bold)s (%(time)s) %(link)s
-#plain         [%(name)s] %(bold)s%(link)s%(bold)s [%(title)s] (%(time)s)
-title_time    [%(name)s] %(title)s (%(time)s)
-title_only    %(title)s
-
-# vim filetype=text
