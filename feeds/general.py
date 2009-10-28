@@ -8,6 +8,7 @@ import urllib
 import traceback
 import yaml
 import email.utils
+import re
 
 import feedparser
 import config
@@ -21,7 +22,7 @@ def get_updated(entry, default=None):
     """Returns updated time of the entry, in unix timestamp.
     default -- current time if None
     """
-    if 'updated_parsed' in entry:
+    if getattr(entry, 'has_key', None) and entry.has_key('updated_parsed'):
         # assuming entry.updated_parsed is in UTC
         return calendar.timegm(entry['updated_parsed'])
     elif default is not None:
@@ -89,7 +90,7 @@ class FeedFetcher(object):
                 entry_data['title'] = entry['title']
             if entry.has_key('link'):
                 entry_data['link'] = entry['link']
-            if 'updated' not in entry and 'updated_parsed' in entry:
+            if entry.get('updated_parsed', None):
                 entry_data['updated'] = tuple2rfc(entry['updated_parsed'])
             data['entries'].append(entry_data)
         yml = yaml.dump(data,
@@ -105,7 +106,7 @@ class FeedFetcher(object):
         self.initialized = True
 
     def is_entry_fresh(self, entry):
-        if not self.ignore_time and 'updated_parsed' in entry:
+        if not self.ignore_time and entry.has_key('updated_parsed'):
             now = time.time() + config.FUTURE_THRESHOLD
             return self.last_confirmed < get_updated(entry) < now
         if entry.has_key('id'):
@@ -126,32 +127,35 @@ class FeedFetcher(object):
             referrer = self.main_link
         )
 
-    def get_entries(self):
+    def get_fresh_entries(self):
         if not self.initialized:
             self.load_cache()
-        feed = None
-        fetch_time = time.time()
-        try:
-            feed = self._parse_feed()
-        except TimedOutException:
-            trace('Timed out while parsing %s' % self.uri)
-        except LookupError:
-            trace('Invalid character in %s' % self.uri)
-        except UnicodeDecodeError:
-            trace('Invalid character in %s' % self.uri)
-        if feed is None:
+        entries = self.get_entries()
+        # XXX remove duplicate
+        fresh_entries = [_ for _ in entries + self.entries \
+            if self.is_entry_fresh(_)]
+        if not fresh_entries:
             return []
+        self.save_cache(entries)
+        return fresh_entries
+
+    def get_entries(self):
+        feed = self._parse_feed()
         if not feed.entries:
             return []
         self.main_link = feed.get('link', None)
         self.etag = feed.get('etag', None)
         if feed.has_key('updated'):
             self.last_modified = time.mktime(feed.updated)
-        fresh_entries = [entry for entry in feed.entries + self.entries if self.is_entry_fresh(entry)]
-        if not fresh_entries:
-            return []
-        self.save_cache(feed.entries)
-        return fresh_entries
+        return feed.entries
+
+    def update_timestamp(self, entries, request_time=None):
+        if not entries:     
+            return  
+        t = max(get_updated(entry) for entry in entries)
+        if t > self.last_confirmed:     
+            self.last_confirmed = t
+        self.save_cache(self.entries)
 
 class EntryFormatter(object):
     """format feed entry into an irc packet."""
@@ -174,22 +178,32 @@ class EntryFormatter(object):
         if self.digest:
             for result in self.digest_entries(entries):
                 yield result
-            return
-        for entry in entries:
-            result = self.format_entry(entry)
-            if result:
-                yield result
+        else:
+            for entry in entries:
+                result = self.format_entry(entry)
+                if result:
+                    yield result
 
     def digest_entries(self, entries):
         buffer = ''
         delimiter = ' | '
+        titles = set()
         for entry in entries:
             args = self.build_arguments(entry)
-            msg = '\x02%(title)s\x02' % args
+            m = re.match(r'(?P<title>.*?)(\(.+\))?(\.\w+)?', args['title'])
+            titles.add(m.group('title'))
+        for title in titles:
+            if not title:
+                continue
+            msg = '\x02%s\x02' % title
             if len(buffer) + len(delimiter) + len(msg) > config.MAX_CHAR:
                 yield (self.target, buffer, {})
-                buffer = msg
-            buffer += delimiter + msg
+                buffer = ''
+            buffer += delimiter if buffer else '[%(name)s]' % args # XXX
+            buffer += msg
+            if len(buffer) > config.MAX_CHAR:
+                yield (self.target, buffer, {})
+                buffer = ''
         if buffer:
             yield (self.target, buffer, {})
 

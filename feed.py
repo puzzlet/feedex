@@ -112,7 +112,7 @@ class FeedBot(Bot):
         if config.DEBUG_MODE:
             trace('Trying to parse from %s' % fetcher.uri)
         try:
-            entries = fetcher.get_entries()
+            entries = fetcher.get_fresh_entries()
         except:
             traceback.print_exc()
             return
@@ -122,6 +122,9 @@ class FeedBot(Bot):
                     self.buffer.append((target, msg, opt))
             except:
                 traceback.print_exc()
+                return
+        if entries:
+            fetcher.update_timestamp(entries)
 
     @periodic(config.BUFFER_PERIOD)
     def send_buffer(self):
