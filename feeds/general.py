@@ -1,5 +1,5 @@
 #coding: utf-8
-import os.path
+import os
 import time
 import calendar
 import datetime
@@ -219,7 +219,8 @@ class EntryFormatter(object):
             result['time'] = datetime.datetime.fromtimestamp(
                     get_updated(entry),
                     KoreanStandardTime()).isoformat(' ')
-        result['title'] = force_unicode(entry['title']).replace(u'\n', ' ')
+        if 'title' in entry:
+            result['title'] = force_unicode(entry['title']).replace(u'\n', ' ')
         return result
 
 class FeedManager(object):
@@ -230,6 +231,8 @@ class FeedManager(object):
         self.formatter_class = formatter_class
 
     def load_data(self):
+        if not os.access(self.file_path, os.F_OK):
+            return None
         try:
             return yaml.load(open(self.file_path).read())
         except Exception:
@@ -238,7 +241,10 @@ class FeedManager(object):
     def load(self):
         fetcher = {}
         format = self.load_formats()
-        for entry in self.load_data():
+        data = self.load_data()
+        if not data:
+            return
+        for entry in data:
             if 'format' in entry and entry['format'] in format:
                 entry['format'] = format[entry['format']]
             key = entry['uri'] + str(entry.get('ignore_time', False))
@@ -259,6 +265,9 @@ class FeedManager(object):
 
     def load_formats(self):
         return yaml.load(open(os.path.join(FILE_PATH, 'format.yml')))
+
+    def reload(self):
+        raise NotImplementedError
 
 manager = FeedManager('general.yml')
 

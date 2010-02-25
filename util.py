@@ -60,15 +60,17 @@ def limit_time(timeout):
 
     return decorate
 
-def force_unicode(str, encoding=''):
-    if type(str) == unicode:
-        return str
+def force_unicode(string, encoding=''):
+    if isinstance(string, unicode):
+        return string
+    if string == '':
+        return u''
     if not encoding:
-        encoding = chardet.detect(str)['encoding']
+        encoding = chardet.detect(string)['encoding']
     if not encoding:
-        print "Cannot find encoding for %s" % repr(str)
+        print "Cannot find encoding for %s" % repr(string)
         return "?"
-    return str.decode(encoding, 'ignore')
+    return string.decode(encoding, 'ignore')
 
 def rfc2timestamp(rfc, default=0):
     if rfc:

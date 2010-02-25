@@ -175,7 +175,7 @@ class FeedBot(Bot):
             try:
                 fp, filename, opt = imp.find_module(handler_name, [import_path])
             except ImportError:
-                traceback.print_exception(*sys.exc_info())
+                traceback.print_exc()
                 continue
             try:
                 m = imp.load_module(handler_name, fp, filename, opt)
@@ -185,7 +185,6 @@ class FeedBot(Bot):
                 })
             except Exception:
                 traceback.print_exc()
-                continue
             finally:
                 if fp:
                     fp.close()
