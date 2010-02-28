@@ -1,3 +1,7 @@
-# Wikimedia Commons Photo of the Day
-- { name: 'Photo of the Day',   targets: ['#feedex'],     format: 'default',    uri: 'http://toolserver.org/~daniel/potd/commons/potd-400x300.rss'    }
+- # Wikimedia Commons Photo of the Day
+    name: 'Photo of the Day'
+    targets:
+        - '#feedex'
+    format: 'default'
+    uri: 'http://toolserver.org/~daniel/potd/commons/potd-400x300.rss'
 

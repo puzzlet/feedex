@@ -1,0 +1,9 @@
+user:
+    - 'user_twitter_account'
+entry:
+    -
+        user:
+            - 'big_ben_clock'
+        targets:
+            - '#england'
+
