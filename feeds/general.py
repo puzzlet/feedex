@@ -60,7 +60,7 @@ class FeedFetcher(object):
         self.last_confirmed = rfc2timestamp(data.get('last-confirmed', None), 0)
         self.last_modified = rfc2timestamp(data.get('last-modified', None), 0)
         self.entries = data.get('entries', []) if data else []
-        for entry in self.entries:
+        for entry in self.entries or []:
             if 'updated' not in entry:
                 continue
             entry['updated'] = email.utils.parsedate(entry['updated'])
@@ -166,9 +166,9 @@ class FeedFetcher(object):
 class EntryFormatter(object):
     """format feed entry into an irc packet."""
 
-    def __init__(self, target, msg_format, arguments=None, digest=False):
+    def __init__(self, target, message_format, arguments=None, digest=False):
         self.target = force_unicode(target)
-        self.format = force_unicode(msg_format)
+        self.format = force_unicode(message_format)
         self.arguments = arguments or {}
         self.digest = digest
 
@@ -263,7 +263,7 @@ class FeedManager(object):
             for target in entry['targets']:
                 formatter = self.formatter_class(
                     target=target.strip(),
-                    format=entry['format'],
+                    message_format=entry['format'],
                     arguments={'name': entry['name']},
                     digest=entry.get('digest', False)
                 )

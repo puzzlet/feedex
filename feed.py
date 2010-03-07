@@ -134,8 +134,8 @@ class FeedBot(Bot):
         target, msg, opt = self.buffer[0]
         now = time.time()
         trace('%d messages in buffer' % len(self.buffer))
-        # 미래에 보여줄 것은 미래까지 기다림
         if opt.get('timestamp', now-1) > now:
+            # 미래에 보여줄 것은 미래까지 기다림
             return
         print self.buffer[0]
         msg = force_unicode(msg)
@@ -216,7 +216,6 @@ class FeedBot(Bot):
 ####
 
 if __name__ == '__main__':
-    CHANNELS = ['#snucse-feed', '#snucse_18+']
     bot = FeedBot(
             server_list=config.SERVER_LIST,
             nick_list=config.NICKNAME_LIST,

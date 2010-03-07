@@ -61,7 +61,7 @@ class TwitterFormatter(EntryFormatter):
     def __init__(self, target, user_name):
         super(TwitterFormatter, self).__init__(
             target=target,
-            format=u'%(user)s: %(title)s (%(time)s)'
+            message_format=u'%(user)s: %(title)s (%(time)s)'
         )
         self.user_name = user_name
 
