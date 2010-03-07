@@ -12,9 +12,9 @@ import re
 
 import feedparser
 import config
-from util import force_unicode, limit_time, trace
+from util import force_unicode, limit_time
 from util import rfc2timestamp, tuple2rfc
-from util import TimedOutException, KoreanStandardTime
+from util import KoreanStandardTime
 
 FILE_PATH = os.path.dirname(__file__)
 
@@ -68,9 +68,11 @@ class FeedFetcher(object):
 
     def save_cache(self, entries):
         """Save the feed's information into the cache file.
+        Entries timestamped at future are not saved, unless ignore_time is set.
         entries -- save only these entries, to prevent the cache from being
                    flooded with all the older entries.
         """
+        now = time.time() + config.FUTURE_THRESHOLD
         data = {}
         data['uri'] = self.uri
         if self.main_link:
@@ -83,6 +85,8 @@ class FeedFetcher(object):
             data['etag'] = self.etag
         data['entries'] = []
         for entry in entries:
+            if not self.ignore_time and get_updated(entry) > now:
+                continue
             entry_data = {}
             if entry.has_key('id'):
                 entry_data['id'] = entry['id']
@@ -113,9 +117,11 @@ class FeedFetcher(object):
             return all(entry['id'] != _.get('id', None) for _ in self.entries)
         # TODO: title-link pair might be smarter
         if entry.has_key('title'):
-            return all(entry['title'] != _.get('title', None) for _ in self.entries)
+            return all(entry['title'] != _.get('title', None)
+                for _ in self.entries)
         if entry.has_key('link'):
-            return all(entry['link'] != _.get('link', None) for _ in self.entries)
+            return all(entry['link'] != _.get('link', None)
+                for _ in self.entries)
         return True
 
     @limit_time(config.TIMEOUT_THRESHOLD)
@@ -149,7 +155,7 @@ class FeedFetcher(object):
             self.last_modified = time.mktime(feed.updated)
         return feed.entries
 
-    def update_timestamp(self, entries, request_time=None):
+    def update_timestamp(self, entries):
         if not entries:     
             return  
         t = max(get_updated(entry) for entry in entries)
@@ -160,10 +166,10 @@ class FeedFetcher(object):
 class EntryFormatter(object):
     """format feed entry into an irc packet."""
 
-    def __init__(self, target, format, arguments={}, digest=False):
+    def __init__(self, target, msg_format, arguments=None, digest=False):
         self.target = force_unicode(target)
-        self.format = force_unicode(format)
-        self.arguments = arguments
+        self.format = force_unicode(msg_format)
+        self.arguments = arguments or {}
         self.digest = digest
 
     def format_entry(self, entry):
@@ -185,7 +191,7 @@ class EntryFormatter(object):
                     yield result
 
     def digest_entries(self, entries):
-        buffer = ''
+        msg_buffer = ''
         delimiter = ' | '
         titles = set()
         for entry in entries:
@@ -196,16 +202,16 @@ class EntryFormatter(object):
             if not title:
                 continue
             msg = '\x02%s\x02' % title
-            if len(buffer) + len(delimiter) + len(msg) > config.MAX_CHAR:
-                yield (self.target, buffer, {})
-                buffer = ''
-            buffer += delimiter if buffer else '[%(name)s]' % args # XXX
-            buffer += msg
-            if len(buffer) > config.MAX_CHAR:
-                yield (self.target, buffer, {})
-                buffer = ''
-        if buffer:
-            yield (self.target, buffer, {})
+            if len(msg_buffer) + len(delimiter) + len(msg) > config.MAX_CHAR:
+                yield (self.target, msg_buffer, {})
+                msg_buffer = ''
+            msg_buffer += delimiter if msg_buffer else '[%(name)s]' % args # XXX
+            msg_buffer += msg
+            if len(msg_buffer) > config.MAX_CHAR:
+                yield (self.target, msg_buffer, {})
+                msg_buffer = ''
+        if msg_buffer:
+            yield (self.target, msg_buffer, {})
 
     def build_arguments(self, entry):
         result = defaultdict(unicode)
@@ -240,13 +246,13 @@ class FeedManager(object):
 
     def load(self):
         fetcher = {}
-        format = self.load_formats()
+        formats = self.load_formats()
         data = self.load_data()
         if not data:
             return
         for entry in data:
-            if 'format' in entry and entry['format'] in format:
-                entry['format'] = format[entry['format']]
+            if 'format' in entry and entry['format'] in formats:
+                entry['format'] = formats[entry['format']]
             key = entry['uri'] + str(entry.get('ignore_time', False))
             if key not in fetcher:
                 fetcher[key] = self.fetcher_class(
@@ -267,7 +273,7 @@ class FeedManager(object):
         return yaml.load(open(os.path.join(FILE_PATH, 'format.yml')))
 
     def reload(self):
-        raise NotImplementedError
+        pass # TODO
 
 manager = FeedManager('general.yml')
 
