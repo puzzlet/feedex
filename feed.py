@@ -2,6 +2,7 @@
 # -*- encoding: utf-8 -*-
 import os
 import imp
+import time
 import itertools
 import traceback
 from collections import defaultdict
@@ -10,7 +11,7 @@ import irclib
 
 import BufferingBot
 
-from util import trace, force_unicode, timestamp2rfc
+from util import trace, force_unicode
 import config
 
 def periodic(period):
@@ -75,6 +76,7 @@ class FeedBot(BufferingBot.BufferingBot):
             msg = 'Reload successful - %d feeds' % len(self.feeds)
             self.connection.privmsg(nickname, msg)
         elif argv[0] == r'\dump':
+            print '\n-- dump buffer --\n'
             self.buffer.dump()
 
     @periodic(config.FREQUENT_FETCH_PERIOD)
@@ -129,6 +131,15 @@ class FeedBot(BufferingBot.BufferingBot):
         message = BufferingBot.Message(message.command, arguments,
             message.timestamp)
         BufferingBot.BufferingBot.push_message(self, message)
+
+    def pop_buffer(self, message_buffer):
+        print '\r%d message(s) in the buffer' % len(message_buffer)
+        message = message_buffer.peek()
+        if message.timestamp > time.time():
+            # 미래에 보여줄 것은 미래까지 기다림
+            # TODO: ignore_time이면 이 조건 무시
+            return
+        BufferingBot.BufferingBot.pop_buffer(self, message_buffer)
 
     def reload_feed(self):
         self.handlers = []
