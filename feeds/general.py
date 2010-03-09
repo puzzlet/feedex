@@ -138,7 +138,7 @@ class FeedFetcher(object):
             self.load_cache()
         entries = self.get_entries()
         # XXX remove duplicate
-        fresh_entries = [_ for _ in entries + self.entries \
+        fresh_entries = [_ for _ in entries + (self.entries or [])
             if self.is_entry_fresh(_)]
         if not fresh_entries:
             return []
@@ -158,9 +158,9 @@ class FeedFetcher(object):
     def update_timestamp(self, entries):
         if not entries:     
             return  
-        t = max(get_updated(entry) for entry in entries)
-        if t > self.last_confirmed:     
-            self.last_confirmed = t
+        latest = max(get_updated(entry) for entry in entries)
+        if latest > self.last_confirmed:     
+            self.last_confirmed = latest
         self.save_cache(self.entries)
 
 class EntryFormatter(object):
@@ -196,8 +196,8 @@ class EntryFormatter(object):
         titles = set()
         for entry in entries:
             args = self.build_arguments(entry)
-            m = re.match(r'(?P<title>.*?)(\(.+\))?(\.\w+)?', args['title'])
-            titles.add(m.group('title'))
+            match = re.match(r'(?P<title>.*?)(\(.+\))?(\.\w+)?', args['title'])
+            titles.add(match.group('title'))
         for title in titles:
             if not title:
                 continue

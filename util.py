@@ -7,24 +7,23 @@ import datetime
 import email.utils
 import calendar
 
-import feedparser
-
-def trace(str):
-    print('[%s] %s' % (time.strftime('%m %d %H:%M:%S'), str))
+def trace(message):
+    print('[%s] %s' % (time.strftime('%m %d %H:%M:%S'), message))
 
 class KoreanStandardTime(datetime.tzinfo):
-    def utcoffset(self, dt):
+    def utcoffset(self, _):
         return datetime.timedelta(hours=9)
 
-    def dst(self, dt):
+    def dst(self, _):
         return datetime.timedelta(0)
 
-    def tzname(self, dt):
+    def tzname(self, _):
         return '+0900'
 
 class TimedOutException(Exception):
     def __init__(self, value = "Timed Out"):
         self.value = value
+
     def __str__(self):
         return repr(self.value)
 
@@ -41,18 +40,18 @@ def limit_time(timeout):
         def new_f(*args, **kwargs):
             old = signal.signal(signal.SIGALRM, handler)
             signal.alarm(int(timeout))
-            e = None
+            exc = None
             try:
                 result = f(*args, **kwargs)
-            except Exception, e:
-                type, value, tb = sys.exc_info()
+            except Exception, exc:
+                _, _, tb = sys.exc_info()
             finally:
                 signal.signal(signal.SIGALRM, old)
             signal.alarm(0)
-            if e:
+            if exc:
                 traceback.print_tb(tb)
-                print e
-                raise e
+                print exc
+                raise exc
             return result
         
         new_f.func_name = f.func_name

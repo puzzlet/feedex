@@ -5,20 +5,19 @@ import email.utils
 import twitter
 import getpass
 
-from util import KoreanStandardTime
 from feeds.general import FeedFetcher, EntryFormatter, FeedManager
 
 FILE_PATH = os.path.dirname(__file__)
 
 class TwitterFetcher(FeedFetcher):
-    def __init__(self, user, password, friends=[]):
+    def __init__(self, user, password, friends=None):
         super(TwitterFetcher, self).__init__(uri='Twitter',
                                              ignore_time=False,
                                              frequent=False)
         self.user = user
         self.api = twitter.Api(username=user, password=password)
         self.cache = {}
-        for friend in friends:
+        for friend in friends or []:
             self.cache[friend] = FeedFetcher('http://twitter.com/%s' % friend,
                                              ignore_time=False,
                                              frequent=False)
@@ -66,7 +65,6 @@ class TwitterFormatter(EntryFormatter):
         self.user_name = user_name
 
     def format_entry(self, entry):
-        print entry
         user_name = entry['user']
         if isinstance(self.user_name, list):
             if user_name not in self.user_name:
@@ -89,7 +87,6 @@ class TwitterManager(FeedManager):
         self.fetcher = {}
 
     def load(self):
-        format = self.load_formats()
         data = self.load_data()
         friends = []
         for entry in data['entry']:
@@ -111,6 +108,9 @@ class TwitterManager(FeedManager):
                 )
                 for user in data['user']:
                     yield (self.fetcher[user], formatter)
+
+    def reload(self):
+        pass # TODO
 
 manager = TwitterManager('twit.yml')
 

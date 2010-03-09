@@ -1,23 +1,14 @@
 #!/usr/bin/env python
 # -*- encoding: utf-8 -*-
 import os
-import sys
 import imp
-import datetime
-import time
-import calendar
 import itertools
 import traceback
-try:
-    # for python 3.0
-    from urllib.parse import quote
-except ImportError:
-    from urllib import quote
 from collections import defaultdict
 
-from irclib import is_channel, nm_to_n
-from ircbot import SingleServerIRCBot as Bot
-from ircbot import ServerConnectionError
+import irclib
+
+import BufferingBot
 
 from util import trace, force_unicode
 import config
@@ -26,36 +17,39 @@ def periodic(period):
     """Decorate a class instance method so that the method would be
     periodically executed by irclib framework.
     """
-    def decorator(f):
-        def new_f(self, *args):
+    def decorator(fun):
+        def new_fun(self, *args):
             try:
-                f(self, *args)
+                fun(self, *args)
             except StopIteration:
                 return
             finally:
-                self.ircobj.execute_delayed(period, new_f, (self,) + args)
-        return new_f
+                self.ircobj.execute_delayed(period, new_fun, (self,) + args)
+        return new_fun
     return decorator
 
-class FeedBot(Bot):
+class FeedBot(BufferingBot.BufferingBot):
     def __init__(self, server_list, nick_list, realname,
                  reconnection_interval=60, use_ssl=False):
-        Bot.__init__(self, server_list, nick_list[0], realname,
-                     reconnection_interval, use_ssl)
+        BufferingBot.BufferingBot.__init__(self, server_list, nick_list[0],
+            realname, reconnection_interval=reconnection_interval,
+            buffer_timeout=-1, # don't use timeout
+            use_ssl=use_ssl)
         self.initialized = False
         self.connection.add_global_handler('welcome', self._on_connected)
         self.connection.add_global_handler('privmsg', self._on_msg, 0)
 
         self.autojoin_channels = set()
         self.feeds = defaultdict(list)
+        self.feed_iter = itertools.cycle(self.feeds)
         self.use_ssl = use_ssl
         self.last_checked = {}
-        self.buffer = []
+        self.handlers = []
         self.frequent_fetches = {}
 
         self.reload_feed()
 
-    def _on_connected(self, c, e):
+    def _on_connected(self, conn, _):
         trace('Connected.')
         try:
             for channel in self.autojoin_channels:
@@ -64,19 +58,18 @@ class FeedBot(Bot):
             pass
         if self.initialized:
             return
-        if c != self.connection:
+        if conn != self.connection:
             return
         self.ircobj.execute_delayed(0, self.iter_feed)
-        self.ircobj.execute_delayed(config.BUFFER_PERIOD, self.send_buffer)
         self.initialized = True
 
-    def _on_msg(self, c, e):
-        if c != self.connection:
+    def _on_msg(self, conn, event):
+        if conn != self.connection:
             return
-        if is_channel(e.target()):
+        if irclib.is_channel(event.target()):
             return
-        nickname = nm_to_n(e.source())
-        argv = e.arguments()[0].decode('utf8', 'ignore').split(' ')
+        nickname = irclib.nm_to_n(event.source())
+        argv = event.arguments()[0].decode('utf8', 'ignore').split(' ')
         if argv[0] == r'\reload':
             self.reload_feed()
             msg = 'Reload successful - %d feeds' % len(self.feeds)
@@ -94,61 +87,46 @@ class FeedBot(Bot):
     def iter_feed(self):
         if not self.feeds:
             return
-        if getattr(self, 'feed_iter', None) is None:
+        if self.feed_iter is None:
             self.feed_iter = itertools.cycle(self.feeds)
         try:
             fetcher = self.feed_iter.next()
         except StopIteration:
-            self.feed_iter = self.feeds.iterkeys()
+            self.feed_iter = itertools.cycle(self.feeds)
             fetcher = self.feed_iter.next()
         except RuntimeError:
             # RuntimeError: dictionary changed size during iteration
-            self.feed_iter = self.feeds.iterkeys()
+            self.feed_iter = itertools.cycle(self.feeds)
             fetcher = self.feed_iter.next()
         self.fetch_feed(fetcher)
 
     def fetch_feed(self, fetcher):
-        timestamps = []
         if config.DEBUG_MODE:
             trace('Trying to parse from %s' % fetcher.uri)
         try:
             entries = fetcher.get_fresh_entries()
-        except:
+        except Exception:
             traceback.print_exc()
             return
         for formatter in self.feeds[fetcher]:
             try:
                 for target, msg, opt in formatter.format_entries(entries):
-                    self.buffer.append((target, msg, opt))
-            except:
+                    trace('New message from %s: %s' % (fetcher.uri, msg))
+                    message = BufferingBot.Message('privmsg',
+                        (target, msg), opt.get('timestamp', None))
+                    self.push_message(message)
+            except Exception:
                 traceback.print_exc()
                 return
         if entries:
             fetcher.update_timestamp(entries)
 
-    @periodic(config.BUFFER_PERIOD)
-    def send_buffer(self):
-        if not self.buffer:
-            return
-        self.buffer.sort(key=lambda _:_[2].get('timestamp', 0))
-        target, msg, opt = self.buffer[0]
-        now = time.time()
-        trace('%d messages in buffer' % len(self.buffer))
-        if opt.get('timestamp', now-1) > now:
-            # 미래에 보여줄 것은 미래까지 기다림
-            return
-        print self.buffer[0]
-        msg = force_unicode(msg)
-        msg = msg.encode('utf8', 'xmlcharrefreplace')
-        target = force_unicode(target).encode('utf8')
-        try:
-            if target.startswith('#') and target not in self.channels:
-                self.connection.join(target)
-            self.connection.privmsg(target, msg)
-            self.buffer.pop(0)
-        except:
-            trace('Failed to send "%s" to %s' % (msg, target))
-            return
+    def push_message(self, message):
+        arguments = tuple(_.encode('utf8', 'xmlcharrefreplace')
+            for _ in message.arguments)
+        message = BufferingBot.Message(message.command, arguments,
+            message.timestamp)
+        BufferingBot.BufferingBot.push_message(self, message)
 
     def reload_feed(self):
         self.handlers = []
@@ -161,33 +139,34 @@ class FeedBot(Bot):
                     self.connection.join(channel)
             for fetcher, enabled in self.frequent_fetches.iteritems():
                 self.ircobj.execute_delayed(0, self.frequent_fetch, (fetcher,))
-                self.frequent_fetches[fetcher] = True
+                self.frequent_fetches[fetcher] = enabled
 
     def reload_feed_handlers(self):
         handler_names = []
         import_path = os.path.join(config.FEEDEX_ROOT, 'feeds')
-        for x in os.listdir(import_path):
-            if x.endswith('.py') and not x.startswith('__'):
-                handler_names.append(x[:-3])
+        for file_name in os.listdir(import_path):
+            if file_name.endswith('.py') and not file_name.startswith('__'):
+                handler_names.append(file_name[:-3])
         self.handlers = []
-        self.autjoin_channels = set()
+        self.autojoin_channels = set()
         for handler_name in handler_names:
             try:
-                fp, filename, opt = imp.find_module(handler_name, [import_path])
+                file_obj, filename, opt = imp.find_module(handler_name,
+                    [import_path])
             except ImportError:
                 traceback.print_exc()
                 continue
             try:
-                m = imp.load_module(handler_name, fp, filename, opt)
+                module = imp.load_module(handler_name, file_obj, filename, opt)
                 self.handlers.append({
                     '__name__': handler_name,
-                    'manager': m.manager,
+                    'manager': module.manager,
                 })
             except Exception:
                 traceback.print_exc()
             finally:
-                if fp:
-                    fp.close()
+                if file_obj:
+                    file_obj.close()
 
     def reload_feed_data(self):
         self.feed_iter = None
@@ -201,8 +180,8 @@ class FeedBot(Bot):
                     self.feeds[fetcher].append(formatter)
                     self.autojoin_channels.add(formatter.target)
                     if fetcher.frequent:
-                        self.frequent_fetches[fetcher] = False
-            except:
+                        self.frequent_fetches[fetcher] = True
+            except Exception:
                 traceback.print_exc()
                 continue
             trace('%s loaded successfully.' % handler['__name__'])
@@ -213,14 +192,14 @@ class FeedBot(Bot):
             if channel not in self.autojoin_channels:
                 self.connection.part(channel.encode('utf-8'))
 
-####
+def main():
+    bot = FeedBot(
+        server_list=config.SERVER_LIST,
+        nick_list=config.NICKNAME_LIST,
+        realname='FeedEx the feed bot',
+        use_ssl=config.USE_SSL)
+    bot.start()
 
 if __name__ == '__main__':
-    bot = FeedBot(
-            server_list=config.SERVER_LIST,
-            nick_list=config.NICKNAME_LIST,
-            realname='FeedEx the feed bot',
-            use_ssl=config.USE_SSL
-            )
-    bot.start()
+    main()
 
