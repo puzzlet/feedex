@@ -77,6 +77,6 @@ def rfc2timestamp(rfc, default=0):
     else:
         return default
 
-def tuple2rfc(timestamp):
+def timestamp2rfc(timestamp):
     return email.utils.formatdate(calendar.timegm(timestamp))
 

@@ -10,7 +10,7 @@ import irclib
 
 import BufferingBot
 
-from util import trace, force_unicode
+from util import trace, force_unicode, timestamp2rfc
 import config
 
 def periodic(period):
@@ -74,6 +74,8 @@ class FeedBot(BufferingBot.BufferingBot):
             self.reload_feed()
             msg = 'Reload successful - %d feeds' % len(self.feeds)
             self.connection.privmsg(nickname, msg)
+        elif argv[0] == r'\dump':
+            self.buffer.dump()
 
     @periodic(config.FREQUENT_FETCH_PERIOD)
     def frequent_fetch(self, fetcher):
