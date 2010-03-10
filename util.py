@@ -2,7 +2,6 @@ import sys
 import traceback
 import signal
 import time
-import chardet
 import datetime 
 import email.utils
 import calendar
@@ -58,18 +57,6 @@ def limit_time(timeout):
         return new_f
 
     return decorate
-
-def force_unicode(string, encoding=''):
-    if isinstance(string, unicode):
-        return string
-    if string == '':
-        return u''
-    if not encoding:
-        encoding = chardet.detect(string)['encoding']
-    if not encoding:
-        print "Cannot find encoding for %s" % repr(string)
-        return "?"
-    return string.decode(encoding, 'ignore')
 
 def rfc2timestamp(rfc, default=0):
     if rfc:

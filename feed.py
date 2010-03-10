@@ -11,7 +11,7 @@ import irclib
 
 import BufferingBot
 
-from util import trace, force_unicode
+from util import trace
 import config
 
 def periodic(period):
@@ -76,7 +76,8 @@ class FeedBot(BufferingBot.BufferingBot):
             msg = 'Reload successful - %d feeds' % len(self.feeds)
             self.connection.privmsg(nickname, msg)
         elif argv[0] == r'\dump':
-            print '\n-- dump buffer --\n'
+            print ''
+            print '-- buffer --'
             self.buffer.dump()
 
     @periodic(config.FREQUENT_FETCH_PERIOD)
@@ -105,8 +106,6 @@ class FeedBot(BufferingBot.BufferingBot):
         self.fetch_feed(fetcher)
 
     def fetch_feed(self, fetcher):
-        if config.DEBUG_MODE:
-            trace('Trying to parse from %s' % fetcher.uri)
         try:
             entries = fetcher.get_fresh_entries()
         except Exception:
@@ -114,11 +113,20 @@ class FeedBot(BufferingBot.BufferingBot):
             return
         for formatter in self.feeds[fetcher]:
             try:
+                debug_message = []
                 for target, msg, opt in formatter.format_entries(entries):
-                    trace('New message from %s: %s' % (fetcher.uri, msg))
+                    timestamp = opt.get('timestamp', None)
+                    debug_message.append('New message at [%s] from %s: %s' %
+                        (time.strftime('%m %d %H:%M:%S',
+                        time.localtime(timestamp or 0)),
+                        fetcher.uri, msg))
                     message = BufferingBot.Message('privmsg',
-                        (target, msg), opt.get('timestamp', None))
+                        (target, msg), timestamp=timestamp)
                     self.push_message(message)
+                if config.DEBUG_MODE and debug_message:
+                    print ''
+                    for _ in debug_message:
+                        trace(_)
             except Exception:
                 traceback.print_exc()
                 return
@@ -133,13 +141,23 @@ class FeedBot(BufferingBot.BufferingBot):
         BufferingBot.BufferingBot.push_message(self, message)
 
     def pop_buffer(self, message_buffer):
-        print '\r%d message(s) in the buffer' % len(message_buffer)
-        message = message_buffer.peek()
-        if message.timestamp > time.time():
+        earliest = message_buffer.peek().timestamp
+        if config.DEBUG_MODE:
+            print ('\r[%s] %d message(s) in the buffer starting from [%s]' %
+                (time.strftime('%m %d %H:%M:%S'), len(message_buffer),
+                time.strftime('%m %d %H:%M:%S', time.localtime(earliest)))),
+        if earliest > time.time():
             # 미래에 보여줄 것은 미래까지 기다림
             # TODO: ignore_time이면 이 조건 무시
             return
         BufferingBot.BufferingBot.pop_buffer(self, message_buffer)
+
+    def process_message(self, message):
+        if config.DEBUG_MODE:
+            print('')
+            self.buffer.dump()
+            trace('%s %s' % (message.command, ' '.join(message.arguments)))
+        BufferingBot.BufferingBot.process_message(self, message)
 
     def reload_feed(self):
         self.handlers = []
@@ -198,12 +216,9 @@ class FeedBot(BufferingBot.BufferingBot):
                 traceback.print_exc()
                 continue
             trace('%s loaded successfully.' % handler['__name__'])
-        if config.DEBUG_MODE:
-            trace(self.autojoin_channels)
         for channel in self.channels:
-            channel = force_unicode(channel)
-            if channel not in self.autojoin_channels:
-                self.connection.part(channel.encode('utf-8'))
+            if channel.decode('utf-8', 'ignore') not in self.autojoin_channels:
+                self.connection.part(channel)
 
 def main():
     bot = FeedBot(

@@ -11,12 +11,27 @@ import email.utils
 import re
 
 import feedparser
-import config
-from util import force_unicode, limit_time
+import chardet
+
+from util import limit_time
 from util import rfc2timestamp, tuple2rfc
 from util import KoreanStandardTime
 
+import config
+
 FILE_PATH = os.path.dirname(__file__)
+
+def force_unicode(string, encoding=''):
+    if isinstance(string, unicode):
+        return string
+    if string == '':
+        return u''
+    if not encoding:
+        encoding = chardet.detect(string)['encoding']
+    if not encoding:
+        print "Cannot find encoding for %s" % repr(string)
+        return "?"
+    return string.decode(encoding, 'ignore')
 
 def get_updated(entry, default=None):
     """Returns updated time of the entry, in unix timestamp.
