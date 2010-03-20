@@ -7,7 +7,9 @@ import email.utils
 import calendar
 
 def format_time(timestamp=None):
-    return time.strftime('%m %d %H:%M:%S', time.localtime(timestamp or 0))
+    if timestamp is None:
+        return time.strftime('%m %d %H:%M:%S')
+    return time.strftime('%m %d %H:%M:%S', time.localtime(timestamp))
 
 def trace(message):
     print('[%s] %s' % (time.strftime('%m %d %H:%M:%S'), message))

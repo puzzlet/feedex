@@ -19,7 +19,7 @@ class FeedBot(BufferingBot):
         self.version = -1
         self.config_timestamp = -1
         self.debug_mode = False
-        self.reload()
+        self.load()
 
         server = self.config['server']
         nickname = self.config['nickname']
@@ -116,7 +116,7 @@ class FeedBot(BufferingBot):
                 timestamps = []
                 for target, msg, opt in formatter.format_entries(entries):
                     timestamp = opt.get('timestamp', None)
-                    timestamps.append(timestamp)
+                    timestamps.append(timestamp or 0)
                     message = Message('privmsg',
                         (target, msg), timestamp=timestamp)
                     print message
@@ -145,7 +145,7 @@ class FeedBot(BufferingBot):
         earliest = message_buffer.peek().timestamp
         if self.debug_mode:
             print('\r[%s] %d message(s) in the buffer starting from [%s]' %
-                (format_time(), len(message_buffer), format_time(earliest)))
+                (format_time(), len(message_buffer), format_time(earliest))),
         if earliest > time.time():
             # 미래에 보여줄 것은 미래까지 기다림
             # TODO: ignore_time이면 이 조건 무시
