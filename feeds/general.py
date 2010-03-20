@@ -37,10 +37,14 @@ def get_updated(entry, default=None):
     """Returns updated time of the entry, in unix timestamp.
     default -- current time if None
     """
-    if getattr(entry, 'has_key', None) and entry.has_key('updated_parsed'):
-        # assuming entry.updated_parsed is in UTC
-        return calendar.timegm(entry['updated_parsed'])
-    elif default is not None:
+    try:
+        result = entry.get('updated_parsed', None)
+        if result:
+            # assuming entry.updated_parsed is in UTC
+            return calendar.timegm(result)
+    except AttributeError:
+        pass
+    if default is not None:
         return default
     else:
         return time.time()

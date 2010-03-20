@@ -149,13 +149,14 @@ class FeedBot(BufferingBot.BufferingBot):
         if earliest > time.time():
             # 미래에 보여줄 것은 미래까지 기다림
             # TODO: ignore_time이면 이 조건 무시
-            return
-        BufferingBot.BufferingBot.pop_buffer(self, message_buffer)
+            return False
+        result = BufferingBot.BufferingBot.pop_buffer(self, message_buffer)
+        if result and config.DEBUG_MODE:
+            self.buffer.dump()
 
     def process_message(self, message):
         if config.DEBUG_MODE:
             print('')
-            self.buffer.dump()
             trace('%s %s' % (message.command, ' '.join(message.arguments)))
         BufferingBot.BufferingBot.process_message(self, message)
 
