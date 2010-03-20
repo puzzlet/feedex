@@ -17,9 +17,10 @@ from util import limit_time
 from util import rfc2timestamp, tuple2rfc
 from util import KoreanStandardTime
 
-import config
-
 FILE_PATH = os.path.dirname(__file__)
+FUTURE_THRESHOLD = 86400
+TIMEOUT_THRESHOLD = 30
+MAX_CHAR = 300
 
 def force_unicode(string, encoding=''):
     if isinstance(string, unicode):
@@ -91,7 +92,7 @@ class FeedFetcher(object):
         entries -- save only these entries, to prevent the cache from being
                    flooded with all the older entries.
         """
-        now = time.time() + config.FUTURE_THRESHOLD
+        now = time.time() + FUTURE_THRESHOLD
         data = {}
         data['uri'] = self.uri
         if self.main_link:
@@ -130,7 +131,7 @@ class FeedFetcher(object):
 
     def is_entry_fresh(self, entry):
         if not self.ignore_time and entry.has_key('updated_parsed'):
-            now = time.time() + config.FUTURE_THRESHOLD
+            now = time.time() + FUTURE_THRESHOLD
             return self.last_confirmed < get_updated(entry) < now
         if entry.has_key('id'):
             return all(entry['id'] != _.get('id', None) for _ in self.entries)
@@ -143,7 +144,7 @@ class FeedFetcher(object):
                 for _ in self.entries)
         return True
 
-    @limit_time(config.TIMEOUT_THRESHOLD)
+    @limit_time(TIMEOUT_THRESHOLD)
     def _parse_feed(self):
         return feedparser.parse(
             self.uri,
@@ -221,12 +222,12 @@ class EntryFormatter(object):
             if not title:
                 continue
             msg = '\x02%s\x02' % title
-            if len(msg_buffer) + len(delimiter) + len(msg) > config.MAX_CHAR:
+            if len(msg_buffer) + len(delimiter) + len(msg) > MAX_CHAR:
                 yield (self.target, msg_buffer, {})
                 msg_buffer = ''
             msg_buffer += delimiter if msg_buffer else '[%(name)s]' % args # XXX
             msg_buffer += msg
-            if len(msg_buffer) > config.MAX_CHAR:
+            if len(msg_buffer) > MAX_CHAR:
                 yield (self.target, msg_buffer, {})
                 msg_buffer = ''
         if msg_buffer:
@@ -254,17 +255,10 @@ class FeedManager(object):
         self.file_path = os.path.join(FILE_PATH, file_path)
         self.fetcher_class = fetcher_class
         self.formatter_class = formatter_class
-
-    def load_data(self):
-        if not os.access(self.file_path, os.F_OK):
-            return None
-        try:
-            return yaml.load(open(self.file_path).read())
-        except Exception:
-            traceback.print_exc()
+        self.fetcher = {}
 
     def load(self):
-        fetcher = {}
+        self.fetcher = {}
         formats = self.load_formats()
         data = self.load_data()
         if not data:
@@ -272,9 +266,9 @@ class FeedManager(object):
         for entry in data:
             if 'format' in entry and entry['format'] in formats:
                 entry['format'] = formats[entry['format']]
-            key = entry['uri'] + str(entry.get('ignore_time', False))
-            if key not in fetcher:
-                fetcher[key] = self.fetcher_class(
+            key = self._get_entry_key(entry)
+            if key not in self.fetcher:
+                self.fetcher[key] = self.fetcher_class(
                     uri=entry['uri'],
                     ignore_time = entry.get('ignore_time', False),
                     frequent = entry.get('frequent', False)
@@ -286,13 +280,27 @@ class FeedManager(object):
                     arguments={'name': entry['name']},
                     digest=entry.get('digest', False)
                 )
-                yield (fetcher[key], formatter)
+                yield (self.fetcher[key], formatter)
+
+    def _get_entry_key(self, entry):
+        return (entry['uri'], entry.get('ignore_time', False))
+
+    def load_data(self):
+        if not os.access(self.file_path, os.F_OK):
+            return None
+        try:
+            return yaml.load(open(self.file_path).read())
+        except Exception:
+            traceback.print_exc()
 
     def load_formats(self):
         return yaml.load(open(os.path.join(FILE_PATH, 'format.yml')))
 
     def reload(self):
-        pass # TODO
+        fetcher_old = self.fetcher
+        self.fetcher = {}
+        formats = self.load_formats()
+        data = self.load_data()
 
 manager = FeedManager('general.yml')
 

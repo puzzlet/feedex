@@ -6,6 +6,9 @@ import datetime
 import email.utils
 import calendar
 
+def format_time(timestamp=None):
+    return time.strftime('%m %d %H:%M:%S', time.localtime(timestamp or 0))
+
 def trace(message):
     print('[%s] %s' % (time.strftime('%m %d %H:%M:%S'), message))
 
@@ -32,10 +35,8 @@ def limit_time(timeout):
         if 'SIGALRM' not in dir(signal):
             print 'Warning: SIGALRM not supported by OS'
             return f
-
         def handler(signum, frame):
             raise TimedOutException()
-        
         def new_f(*args, **kwargs):
             old = signal.signal(signal.SIGALRM, handler)
             signal.alarm(int(timeout))
@@ -52,10 +53,8 @@ def limit_time(timeout):
                 print exc
                 raise exc
             return result
-        
         new_f.func_name = f.func_name
         return new_f
-
     return decorate
 
 def rfc2timestamp(rfc, default=0):
