@@ -117,6 +117,8 @@ class FeedBot(BufferingBot):
                 for target, msg, opt in formatter.format_entries(entries):
                     timestamp = opt.get('timestamp', None)
                     timestamps.append(timestamp or 0)
+                    assert isinstance(target, unicode)
+                    assert isinstance(msg, unicode)
                     message = Message('privmsg',
                         (target, msg), timestamp=timestamp)
                     print message
@@ -132,14 +134,6 @@ class FeedBot(BufferingBot):
                 return
         if entries:
             fetcher.update_timestamp(entries)
-
-    def push_message(self, message):
-        """Override BufferingBot.push_message(message)
-        encodes arguments in UTF-8."""
-        arguments = tuple(_.encode('utf8', 'xmlcharrefreplace')
-            for _ in message.arguments)
-        message = Message(message.command, arguments, message.timestamp)
-        BufferingBot.push_message(self, message)
 
     def pop_buffer(self, message_buffer):
         earliest = message_buffer.peek().timestamp
@@ -215,12 +209,13 @@ class FeedBot(BufferingBot):
             return None
         try:
             module = imp.load_module(handler_name, file_obj, filename, opt)
+            return module
         except Exception:
             traceback.print_exc()
         finally:
             if file_obj:
                 file_obj.close()
-        return module
+        return None
 
     def _load_feed_data(self):
         self.feed_iter = None
