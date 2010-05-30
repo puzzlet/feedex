@@ -1,44 +1,48 @@
 #coding: utf-8
-
 import os.path
+import imp
 import email.utils
-import twitter
 import getpass
-
-from feeds.general import FeedFetcher, EntryFormatter, FeedManager
+import tweepy
+from collections import defaultdict
 
 FILE_PATH = os.path.dirname(__file__)
 
+# dynamically import feeds.general
+# ../feed.py should handle any exception
+_ = imp.find_module('general', [FILE_PATH])
+feeds_general = imp.load_module('general', *_)
+FeedFetcher = feeds_general.FeedFetcher
+EntryFormatter = feeds_general.EntryFormatter
+FeedManager = feeds_general.FeedManager
+
 class TwitterFetcher(FeedFetcher):
-    def __init__(self, user, password, friends=None):
-        super(TwitterFetcher, self).__init__(uri='Twitter',
-                                             ignore_time=False,
-                                             frequent=False)
-        self.user = user
-        self.api = twitter.Api(username=user, password=password)
+    def __init__(self, api, friends=None):
+        FeedFetcher.__init__(self, uri='Twitter', ignore_time=False,
+            frequent=False)
+        self.api = api
         self.cache = {}
         for friend in friends or []:
             self.cache[friend] = FeedFetcher('http://twitter.com/%s' % friend,
-                                             ignore_time=False,
-                                             frequent=False)
+                ignore_time=False, frequent=False)
 
     def get_entries(self):
-        timeline = self.api.GetFriendsTimeline(self.user)
+        timeline = self.api.friends_timeline()
         entries = []
         for status in timeline:
             entries.append({
-                'user': status.user.screen_name,
+                'user': status.author.screen_name,
                 'text': status.text,
                 'title': status.text, # XXX
                 'link': '', # XXX
-                'updated_parsed': email.utils.parsedate(status.created_at)
+                'updated_parsed': status.created_at,
             })
         return entries
 
     def get_fresh_entries(self):
         all_entries = self.get_entries()
         result = []
-        for friend, cache in self.cache.iteritems():
+        for friend, cache in self.cache.items():
             if not cache.initialized:
                 cache.load_cache()
             entries = [_ for _ in all_entries if _['user'] == friend]
@@ -53,23 +57,19 @@ class TwitterFetcher(FeedFetcher):
         return result
 
     def update_timestamp(self, entries):
-        for _, cache in self.cache.iteritems():
+        for _, cache in self.cache.items():
             cache.update_timestamp(entries)
 
 class TwitterFormatter(EntryFormatter):
-    def __init__(self, target, user_name):
+    def __init__(self, target, user_names):
         super(TwitterFormatter, self).__init__(
             target=target,
-            message_format=u'%(user)s: %(title)s (%(time)s)'
+            message_format='%(user)s: %(title)s (%(time)s)'
         )
-        self.user_name = user_name
+        self.user_names = user_names
 
     def format_entry(self, entry):
-        user_name = entry['user']
-        if isinstance(self.user_name, list):
-            if user_name not in self.user_name:
-                return
-        elif user_name != self.user_name:
+        if entry['user'] not in self.user_names:
             return
         return super(TwitterFormatter, self).format_entry(entry)
 
@@ -85,29 +85,49 @@ class TwitterManager(FeedManager):
             fetcher_class=TwitterFetcher,
             formatter_class=TwitterFormatter)
         self.fetcher = {}
+        self.api = {}
 
     def load(self):
         data = self.load_data()
-        friends = []
+        friends = set()
+        list_members = defaultdict(set)
+        for user_name in data['user']:
+            password = getpass.getpass("Twitter password for %s: " % user_name)
+            self.api[user_name] = tweepy.API(tweepy.BasicAuthHandler(user_name,
+                password))
         for entry in data['entry']:
-            for user in entry['user']:
-                friends.append(user)
-        for user in data['user']:
-            if user not in self.fetcher:
-                prompt = "Twitter password for %s: " % user
-                self.fetcher[user] = self.fetcher_class(
-                    user=user,
-                    password=getpass.getpass(prompt),
-                    friends=friends
-                )
+            for user in entry.get('user', []):
+                friends.add(user)
+            for owner_slug in entry.get('list', []):
+                owner, _, slug = owner_slug.partition('/')
+                api = self.api[owner] # XXX
+                cursor = -1
+                while cursor:
+                    users, cursor, _ = api.list_members(owner=owner, slug=slug,
+                        cursor=cursor)
+                    for user in users:
+                        list_members[owner_slug].add(user.screen_name)
+                for user_name in list_members[owner_slug]:
+                    friends.add(user_name)
+        for user_name in data['user']:
+            if user_name not in self.fetcher:
+                self.fetcher[user_name] = self.fetcher_class(
+                    api=self.api[user_name],
+                    friends=friends)
         for entry in data['entry']:
+            user_names = set()
+            for owner_slug in entry.get('list', []):
+                for user_name in list_members[owner_slug]:
+                    user_names.add(user_name)
+            for user in entry.get('user', []):
+                user_names.add(user)
             for target in entry['targets']:
                 formatter = self.formatter_class(
                     target=target.strip(),
-                    user_name=entry['user']
-                )
+                    user_names=user_names)
                 for user in data['user']:
                     yield (self.fetcher[user], formatter)
+                    # XXX duplicate entries when multiple data['user']
 
     def reload(self):
         pass # TODO

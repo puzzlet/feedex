@@ -12,6 +12,8 @@ from BufferingBot import BufferingBot, Message
 
 from util import trace, format_time
 
+_DEBUG = False # don't send anything
+
 class FeedBot(BufferingBot):
     def __init__(self, config_file_name):
         self.config = None
@@ -24,7 +26,7 @@ class FeedBot(BufferingBot):
         server = self.config['server']
         nickname = self.config['nickname']
         BufferingBot.__init__(self, [server], nickname,
-            realname='FeedEx the feed bot',
+            realname=b'FeedEx the feed bot',
             buffer_timeout=-1, # don't use timeout
             use_ssl=self.config.get('use_ssl', False))
 
@@ -93,23 +95,25 @@ class FeedBot(BufferingBot):
         if self.feed_iter is None:
             self.feed_iter = itertools.cycle(self.feeds)
         try:
-            fetcher = self.feed_iter.next()
+            fetcher = next(self.feed_iter)
         except StopIteration:
             self.feed_iter = itertools.cycle(self.feeds)
-            fetcher = self.feed_iter.next()
+            fetcher = next(self.feed_iter)
         except RuntimeError:
             # RuntimeError: dictionary changed size during iteration
             self.feed_iter = itertools.cycle(self.feeds)
-            fetcher = self.feed_iter.next()
+            fetcher = next(self.feed_iter)
         self.fetch_feed(fetcher)
         self.ircobj.execute_delayed(
             self.config.get('fetch_period', 3), self._iter_feed)
 
     def fetch_feed(self, fetcher):
+        entries = []
         try:
             entries = fetcher.get_fresh_entries()
         except Exception:
-            traceback.print_exc()
+            print('An error occured while trying to get %s:' % fetcher.uri)
+            traceback.print_exc(limit=None)
             return
         for formatter in self.feeds[fetcher]:
             try:
@@ -117,40 +121,52 @@ class FeedBot(BufferingBot):
                 for target, msg, opt in formatter.format_entries(entries):
                     timestamp = opt.get('timestamp', None)
                     timestamps.append(timestamp or 0)
-                    assert isinstance(target, unicode)
-                    assert isinstance(msg, unicode)
+                    assert isinstance(target, str)
+                    assert isinstance(msg, str)
                     message = Message('privmsg',
                         (target, msg), timestamp=timestamp)
-                    print message
+                    print(message)
                     self.push_message(message)
                 if self.debug_mode and timestamps:
-                    print ('\r[%s] %s new message(s) from %s, '
+                    print('\r[%s] %s new message(s) from %s, '
                         'at from [%s] to [%s]' %
                         (format_time(), len(timestamps), fetcher.uri,
                         format_time(min(timestamps)),
                         format_time(max(timestamps))))
             except Exception:
-                traceback.print_exc()
+                print('An error occured while trying to format an entries from %s:' % fetcher.uri)
+                traceback.print_exc(limit=None)
                 return
         if entries:
-            fetcher.update_timestamp(entries)
+            try:
+                fetcher.update_timestamp(entries)
+            except Exception:
+                print('An error occured while updating timestamp for %s:' % fetcher.uri)
+                traceback.print_exc(limit=None)
+                return
 
     def pop_buffer(self, message_buffer):
         earliest = message_buffer.peek().timestamp
         if self.debug_mode:
             print('\r[%s] %d message(s) in the buffer starting from [%s]' %
-                (format_time(), len(message_buffer), format_time(earliest))),
+                (format_time(), len(message_buffer), format_time(earliest)), end=' ')
         if earliest > time.time():
             # 미래에 보여줄 것은 미래까지 기다림
             # TODO: ignore_time이면 이 조건 무시
             return False
+        if self.debug_mode:
+            self.process_message(message_buffer.pop())
+            return True
         BufferingBot.pop_buffer(self, message_buffer)
+        return True
 
     def process_message(self, message):
         if self.debug_mode:
-            print '\r[%s] %s %s' % (format_time(), message.command,
-                ' '.join(message.arguments))
+            print('\r[%s] %s %s' % (format_time(), message.command,
+                ' '.join(message.arguments)))
+#            return True
         BufferingBot.process_message(self, message)
+        return True
 
     def load(self):
         data = self._get_config_data()
@@ -179,7 +195,7 @@ class FeedBot(BufferingBot):
                 channel = channel.encode('utf-8')
                 if channel not in self.channels:
                     self.connection.join(channel)
-            for fetcher, enabled in self.frequent_fetches.iteritems():
+            for fetcher, enabled in self.frequent_fetches.items():
                 self.ircobj.execute_delayed(0, self.frequent_fetch, (fetcher,))
                 self.frequent_fetches[fetcher] = enabled
 
@@ -239,25 +255,7 @@ class FeedBot(BufferingBot):
                 self.connection.part(channel)
 
     def _reload_feed_data(self):
-        self.feed_iter = None
-        self.feeds = defaultdict(list)
-        self.autojoin_channels = set()
-        self.frequent_fetches = {}
-        for handler in self.handlers:
-            manager = handler['manager']
-            try:
-                for fetcher, formatter in manager.load():
-                    self.feeds[fetcher].append(formatter)
-                    self.autojoin_channels.add(formatter.target)
-                    if fetcher.frequent:
-                        self.frequent_fetches[fetcher] = True
-            except Exception:
-                traceback.print_exc()
-                continue
-            trace('%s loaded successfully.' % handler['__name__'])
-        for channel in self.channels:
-            if channel.decode('utf-8', 'ignore') not in self.autojoin_channels:
-                self.connection.part(channel)
+        self._load_feed_data()
 
 FEEDEX_ROOT = os.path.dirname(os.path.abspath(__file__))
 

@@ -1,6 +1,6 @@
 import sys
 import traceback
-import signal
+import threading
 import time
 import datetime 
 import email.utils
@@ -12,7 +12,7 @@ def format_time(timestamp=None):
     return time.strftime('%m %d %H:%M:%S', time.localtime(timestamp))
 
 def trace(message):
-    print('[%s] %s' % (time.strftime('%m %d %H:%M:%S'), message))
+    print(('[%s] %s' % (time.strftime('%m %d %H:%M:%S'), message)))
 
 class KoreanStandardTime(datetime.tzinfo):
     def utcoffset(self, _):
@@ -31,32 +31,24 @@ class TimedOutException(Exception):
     def __str__(self):
         return repr(self.value)
 
-def limit_time(timeout):
-    # from http://aspn.activestate.com/ASPN/Cookbook/Python/Recipe/307871
-    def decorate(f):
-        if 'SIGALRM' not in dir(signal):
-            print 'Warning: SIGALRM not supported by OS'
-            return f
-        def handler(signum, frame):
-            raise TimedOutException()
-        def new_f(*args, **kwargs):
-            old = signal.signal(signal.SIGALRM, handler)
-            signal.alarm(int(timeout))
-            exc = None
-            try:
-                result = f(*args, **kwargs)
-            except Exception, exc:
-                _, _, tb = sys.exc_info()
-            finally:
-                signal.signal(signal.SIGALRM, old)
-            signal.alarm(0)
-            if exc:
-                traceback.print_tb(tb)
-                print exc
-                raise exc
-            return result
-        new_f.func_name = f.func_name
-        return new_f
+def limit_time(timeout_duration):
+    # from http://code.activestate.com/recipes/473878/
+    def decorate(func):
+        def new_func(*args, **kwargs):
+            class InterruptableThread(threading.Thread):
+                def __init__(self):
+                    threading.Thread.__init__(self)
+                    self.result = None
+                def run(self):
+                    self.result = func(*args, **kwargs)
+            it = InterruptableThread()
+            it.start()
+            it.join(timeout_duration)
+            if it.isAlive():
+                return it.result
+            return it.result
+        new_func.__name__ = func.__name__
+        return new_func
     return decorate
 
 def rfc2timestamp(rfc, default=0):
