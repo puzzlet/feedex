@@ -102,16 +102,17 @@ class FeedFetcher(object):
                 entry_data['title'] = entry['title']
             if 'link' in entry:
                 entry_data['link'] = entry['link']
-            data['entries'].append(entry_data)
-        self.entries = data['entries']
-        for entry in data['entries']:
-            if entry.get('updated_parsed', None):
+            if 'updated' in entry:
+                entry_data['updated'] = entry['updated']
+            elif 'updated_parsed' in entry:
                 entry_data['updated'] = tuple2rfc(entry['updated_parsed'])
+            data['entries'].append(entry_data)
         yml = yaml.dump(data,
                         default_flow_style=False,
                         encoding='utf-8',
                         allow_unicode=True)
         open(self._get_cache_filename(), 'w+').write(yml.decode('utf-8'))
+        self.entries = data['entries']
 
     def initialize_cache(self):
         self.last_confirmed = time.time()
@@ -126,11 +127,11 @@ class FeedFetcher(object):
             return all(entry['id'] != _.get('id', None) for _ in self.entries)
         # TODO: title-link pair might be smarter
         if 'title' in entry:
-            return all(entry['title'] != _.get('title', None)
-                for _ in self.entries)
+            title = entry['title']
+            return all(title != _.get('title', None) for _ in self.entries)
         if 'link' in entry:
-            return all(entry['link'] != _.get('link', None)
-                for _ in self.entries)
+            link = entry['link']
+            return all(link != _.get('link', None) for _ in self.entries)
         return True
 
     @limit_time(TIMEOUT_THRESHOLD)

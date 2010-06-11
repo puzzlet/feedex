@@ -78,12 +78,19 @@ SANITIZE_HTML = 1
 # ---------- required modules (should come with any Python distribution) ----------
 import html.parser, re, sys, copy, time, email, types, cgi, urllib, urllib.request, urllib.error, urllib.parse
 from io import StringIO as _StringIO
+from io import BytesIO
 
 # ---------- optional modules (feedparser will work without these, but with reduced functionality) ----------
 
 # gzip is included with most Python distributions, but may not be available if you compiled your own
-import gzip
-import zlib
+try:
+    import gzip
+except:
+    gzip = None
+try:
+    import zlib
+except:
+    zlib = None
 
 # If a real XML parser is available, feedparser will attempt to use it.  feedparser has
 # been tested with the built-in SAX parser, PyXML, and libxml2.  On platforms where the
@@ -152,11 +159,19 @@ starttagopen = re.compile('<[>a-zA-Z]')
 shorttagopen = re.compile('<[a-zA-Z][-.a-zA-Z0-9]*/')
 shorttag = re.compile('<([a-zA-Z][-.a-zA-Z0-9]*)/([^/]*)/')
 piclose = re.compile('>')
-endbracket = re.compile('[<>]')
 tagfind = re.compile('[a-zA-Z][-_.:a-zA-Z0-9]*')
 attrfind = re.compile(
     r'\s*([a-zA-Z_][-:.a-zA-Z_0-9]*)(\s*=\s*'
     r'(\'[^\']*\'|"[^"]*"|[][\-a-zA-Z0-9./,:;+*%?!&$\(\)_#=~\'"@]*))?')
+
+class EndBracketMatch:
+    endbracket = re.compile('''([^'"<>]|"[^"]*"(?=>|/|\s|\w+=)|'[^']*'(?=>|/|\s|\w+=))*(?=[<>])|.*?(?=[<>])''')
+    def search(self,string,index=0):
+        self.match = self.endbracket.match(string,index)
+        if self.match: return self
+    def start(self,n):
+        return self.match.end(n)
+endbracket = EndBracketMatch()
 
 class SGMLParser(html.parser.HTMLParser):
     # Definition of entities -- derived classes may override
@@ -166,8 +181,9 @@ class SGMLParser(html.parser.HTMLParser):
 
     def __init__(self, verbose=0):
         """Initialize and reset this instance."""
-        self.verbose = verbose
         html.parser.HTMLParser.__init__(self)
+        self.verbose = verbose
+        self.reset()
 
     def reset(self):
         """Reset this instance. Loses all unprocessed data."""
@@ -843,6 +859,7 @@ class _FeedParserMixin:
 
         # track inline content
         if self.incontent and 'type' in self.contentparams and not self.contentparams.get('type', 'xml').endswith('xml'):
+            if tag in ['xhtml:div', 'div']: return # typepad does this 10/2007
             # element declared itself as escaped markup, but it isn't really
             self.contentparams['type'] = 'application/xhtml+xml'
         if self.incontent and self.contentparams.get('type') == 'application/xhtml+xml':
@@ -1061,7 +1078,8 @@ class _FeedParserMixin:
                 else:
                     pieces = pieces[1:-1]
 
-        output = ''.join(s if isinstance(s, str) else s.encode(self.encoding) for s in pieces)
+        pieces = [s if isinstance(s, str) else s.encode(self.encoding) for s in pieces]
+        output = ''.join(pieces)
         if stripWhitespace:
             output = output.strip()
         if not expectingText: return output
@@ -1069,7 +1087,7 @@ class _FeedParserMixin:
         # decode base64 content
         if base64 and self.contentparams.get('base64', 0):
             try:
-                output = base64.decodebytes(output.encode('utf-8'))
+                output = base64.decodebytes(output.encode(self.encoding)).decode(self.encoding)
             except binascii.Error:
                 pass
             except binascii.Incomplete:
@@ -1131,7 +1149,7 @@ class _FeedParserMixin:
 
         # address common error where people take data that is already
         # utf-8, presume that it is iso-8859-1, and re-encode it.
-        if self.encoding=='utf-8' and not isinstance(output, str):
+        if self.encoding=='utf-8' and isinstance(output, str):
             try:
                 output = str(output.encode('iso-8859-1'), 'utf-8')
             except:
@@ -2028,9 +2046,9 @@ class _BaseHTMLProcessor(SGMLParser):
     def _shorttag_replace(self, match):
         tag = match.group(1)
         if tag in self.elements_no_end_tag:
-            return b'<' + tag + b' />'
+            return '<' + tag + ' />'
         else:
-            return b'<' + tag + b'></' + tag + b'>'
+            return '<' + tag + '></' + tag + '>'
 
     def parse_starttag(self,i):
         j=SGMLParser.parse_starttag(self, i)
@@ -2040,20 +2058,20 @@ class _BaseHTMLProcessor(SGMLParser):
         return j
 
     def feed(self, data):
+        data = re.compile('<!((?!DOCTYPE|--|\[))', re.IGNORECASE).sub('&lt;!\\1', data)
+        #data = re.sub(r'<(\S+?)\s*?/>', self._shorttag_replace, data) # bug [ 1399464 ] Bad regexp for _shorttag_replace
+        data = re.sub('<([^<>\s]+?)\s*/>', self._shorttag_replace, data) 
+        data = data.replace('&#39;', "'")
+        data = data.replace('&#34;', '"')
         if self.encoding and isinstance(data, str):
             data = data.encode(self.encoding)
-        data = re.compile(b'<!((?!DOCTYPE|--|\[))', re.IGNORECASE).sub(b'&lt;!\\1', data)
-        #data = re.sub(r'<(\S+?)\s*?/>', self._shorttag_replace, data) # bug [ 1399464 ] Bad regexp for _shorttag_replace
-        data = re.sub(b'<([^<>\s]+?)\s*/>', self._shorttag_replace, data) 
-        data = data.replace(b'&#39;', b"'")
-        data = data.replace(b'&#34;', b'"')
         SGMLParser.feed(self, data)
         SGMLParser.close(self)
 
     def normalize_attrs(self, attrs):
         if not attrs: return attrs
         # utility method to be called by descendants
-        attrs = [(k.lower(), v) for k, v in attrs]
+        attrs = dict([(k.lower(), v) for k, v in attrs]).items()
         attrs = [(k, v.lower() if k in ('rel', 'type') else v) for k, v in attrs]
         attrs.sort()
         return attrs
@@ -2641,7 +2659,7 @@ class _RelativeURIResolver(_BaseHTMLProcessor):
         if _debug:
             sys.stderr.write('tag: [%s] with attributes: [%s]\n' % (tag, str(attrs)))
         attrs = self.normalize_attrs(attrs)
-        attrs = [(key, ((tag, key) in self.relative_uris) and self.resolveURI(value) or value) for key, value in attrs]
+        attrs = [(key, self.resolveURI(value) if (tag, key) in self.relative_uris else value) for key, value in attrs]
         _BaseHTMLProcessor.unknown_starttag(self, tag, attrs)
 
 def _resolveRelativeURIs(htmlSource, baseURI, encoding, type):
@@ -3079,7 +3097,7 @@ def _open_resource(url_file_stream_or_string, etag, modified, agent, referrer, h
         pass
 
     # treat url_file_stream_or_string as string
-    return _StringIO(str(url_file_stream_or_string))
+    return BytesIO(str(url_file_stream_or_string))
 
 _date_handlers = []
 def registerDateHandler(func):
@@ -3494,6 +3512,7 @@ def _parse_date(dateString):
                 if _debug: sys.stderr.write('date handler function must return 9-tuple\n')
                 raise ValueError
             map(int, date9tuple)
+            if _debug: sys.stderr.write('%s succeeded.\n' % handler.__name__)
             return date9tuple
         except Exception as e:
             if _debug: sys.stderr.write('%s raised %s\n' % (handler.__name__, repr(e)))
@@ -3504,7 +3523,7 @@ def _getCharacterEncoding(http_headers, xml_data):
     '''Get the character encoding of the XML document
 
     http_headers is a dictionary
-    xml_data is a raw string (not Unicode)
+    xml_data is a raw bytes (not string)
     
     This is so much trickier than it sounds, it's not even funny.
     According to RFC 3023 ('XML Media Types'), if the HTTP Content-Type
@@ -3612,7 +3631,8 @@ def _getCharacterEncoding(http_headers, xml_data):
     except:
         xml_encoding_match = None
     if xml_encoding_match:
-        xml_encoding = str(xml_encoding_match.groups()[0].lower(), 'ascii')
+        xml_encoding = xml_encoding_match.groups()[0].lower()
+        xml_encoding = str(xml_encoding, 'ascii')
         if sniffed_xml_encoding and (xml_encoding in ('iso-10646-ucs-2', 'ucs-2', 'csunicode', 'iso-10646-ucs-4', 'ucs-4', 'csucs4', 'utf-16', 'utf-32', 'utf_16', 'utf_32', 'utf16', 'u16')):
             xml_encoding = sniffed_xml_encoding
     acceptable_content_type = 0
@@ -3636,6 +3656,10 @@ def _getCharacterEncoding(http_headers, xml_data):
     # apparently MSIE and Firefox both do the following switch:
     if true_encoding.lower() == 'gb2312':
         true_encoding = 'gb18030'
+    # almost all feeds in cp949 are declared as euc-kr, but since they're
+    # incompatible in some cases, we're doing a simple check:
+    if true_encoding.lower() in ['euc-kr', 'ks_c_5601-1987'] and re.search(b'[\x81-\xa0]', xml_data):
+        true_encoding = 'cp949'
     return true_encoding, http_encoding, xml_encoding, sniffed_xml_encoding, acceptable_content_type
     
 def _toUTF8(data, encoding):
@@ -3714,22 +3738,27 @@ def _stripDoctype(data):
 
     # only allow in 'safe' inline entity definitions
     replacement=b''
+    entities = {}
     if len(doctype_results)==1 and entity_results:
        safe_pattern=re.compile(b'\s+(\w+)\s+"(&#\w+;|[^&"]*)"')
        safe_entities=[e for e in entity_results if safe_pattern.match(e)]
        if safe_entities:
-           replacement=b'<!DOCTYPE feed [\n  <!ENTITY '+b'>\n  <!ENTITY '.join(safe_entities)+b'>\n]>' 
+            replacement=b'<!DOCTYPE feed [\n  <!ENTITY '+b'>\n  <!ENTITY '.join(safe_entities)+b'>\n]>' 
+            for k, v in safe_pattern.findall(replacement):
+                entities[k.decode('iso-8859-1')] = v.decode('iso-8859-1')
     data = doctype_pattern.sub(replacement, head) + data
 
-    return version, data, dict(replacement and safe_pattern.findall(replacement))
+    return version, data, entities
     
 def parse(url_file_stream_or_string, etag=None, modified=None, agent=None, referrer=None, handlers=[]):
-    '''Parse a feed from a URL, file, stream, or string'''
+    '''Parse a feed from a URL, file, stream, or bytes'''
     result = FeedParserDict()
     result['feed'] = FeedParserDict()
     result['entries'] = []
     if _XML_AVAILABLE:
         result['bozo'] = 0
+    if not isinstance(handlers, list):
+        handlers = [handlers]
     try:
         f = _open_resource(url_file_stream_or_string, etag, modified, agent, referrer, handlers)
         data = f.read()
@@ -3743,7 +3772,7 @@ def parse(url_file_stream_or_string, etag=None, modified=None, agent=None, refer
     if f and data and hasattr(f, 'headers'):
         if gzip and f.headers.get('content-encoding', '') == 'gzip':
             try:
-                data = gzip.GzipFile(fileobj=_StringIO(data)).read()
+                data = gzip.GzipFile(fileobj=BytesIO(data)).read()
             except Exception as e:
                 # Some feeds claim to be gzipped but they're not, so
                 # we get garbage.  Ideally, we should re-request the

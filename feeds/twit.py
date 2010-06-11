@@ -89,6 +89,8 @@ class TwitterManager(FeedManager):
 
     def load(self):
         data = self.load_data()
+        if not data:
+            return
         friends = set()
         list_members = defaultdict(set)
         for user_name in data['user']:

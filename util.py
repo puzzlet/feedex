@@ -12,7 +12,7 @@ def format_time(timestamp=None):
     return time.strftime('%m %d %H:%M:%S', time.localtime(timestamp))
 
 def trace(message):
-    print(('[%s] %s' % (time.strftime('%m %d %H:%M:%S'), message)))
+    print('[%s] %s' % (time.strftime('%m %d %H:%M:%S'), message))
 
 class KoreanStandardTime(datetime.tzinfo):
     def utcoffset(self, _):

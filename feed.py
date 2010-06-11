@@ -3,24 +3,26 @@
 import os
 import sys
 import imp
-import time
+import datetime
 import itertools
 import traceback
 from collections import defaultdict
+
+import yaml
 
 from BufferingBot import BufferingBot, Message
 
 from util import trace, format_time
 
-_DEBUG = False # don't send anything
+DONT_SEND_ANYTHING = False
 
 class FeedBot(BufferingBot):
     def __init__(self, config_file_name):
         self.config = None
         self.config_file_name = config_file_name
+        self.buffer_file_name = os.path.join(FEEDEX_ROOT, 'buffer.yml')
         self.version = -1
         self.config_timestamp = -1
-        self.debug_mode = False
         self.load()
 
         server = self.config['server']
@@ -29,6 +31,11 @@ class FeedBot(BufferingBot):
             realname=b'FeedEx the feed bot',
             buffer_timeout=-1, # don't use timeout
             use_ssl=self.config.get('use_ssl', False))
+
+        trace("Loading buffer...")
+        if os.access(self.buffer_file_name, os.F_OK):
+            for message in yaml.load(open(self.buffer_file_name, 'rb')):
+                self.push_message(message)
 
         self.initialized = False
         self.connection.add_global_handler('welcome', self._on_connected)
@@ -123,16 +130,9 @@ class FeedBot(BufferingBot):
                     timestamps.append(timestamp or 0)
                     assert isinstance(target, str)
                     assert isinstance(msg, str)
-                    message = Message('privmsg',
-                        (target, msg), timestamp=timestamp)
-                    print(message)
+                    dt = datetime.datetime.fromtimestamp(timestamp or 0)
+                    message = Message('privmsg', (target, msg), timestamp=dt)
                     self.push_message(message)
-                if self.debug_mode and timestamps:
-                    print('\r[%s] %s new message(s) from %s, '
-                        'at from [%s] to [%s]' %
-                        (format_time(), len(timestamps), fetcher.uri,
-                        format_time(min(timestamps)),
-                        format_time(max(timestamps))))
             except Exception:
                 print('An error occured while trying to format an entries from %s:' % fetcher.uri)
                 traceback.print_exc(limit=None)
@@ -145,28 +145,29 @@ class FeedBot(BufferingBot):
                 traceback.print_exc(limit=None)
                 return
 
+    def flood_control(self):
+        if BufferingBot.flood_control(self):
+            self.dump_buffer()
+
     def pop_buffer(self, message_buffer):
         earliest = message_buffer.peek().timestamp
-        if self.debug_mode:
-            print('\r[%s] %d message(s) in the buffer starting from [%s]' %
-                (format_time(), len(message_buffer), format_time(earliest)), end=' ')
-        if earliest > time.time():
+        if earliest > datetime.datetime.now():
             # 미래에 보여줄 것은 미래까지 기다림
             # TODO: ignore_time이면 이 조건 무시
             return False
-        if self.debug_mode:
-            self.process_message(message_buffer.pop())
-            return True
         BufferingBot.pop_buffer(self, message_buffer)
         return True
 
-    def process_message(self, message):
-        if self.debug_mode:
-            print('\r[%s] %s %s' % (format_time(), message.command,
-                ' '.join(message.arguments)))
-#            return True
-        BufferingBot.process_message(self, message)
-        return True
+    def dump_buffer(self):
+        with open(self.buffer_file_name, 'wb') as fp:
+            yaml.dump(list(self.buffer.dump()), stream=fp,
+                default_flow_style=False,
+                encoding='utf-8',
+                allow_unicode=True)
+
+    def push_message(self, message):
+        BufferingBot.push_message(self, message)
+        self.dump_buffer()
 
     def load(self):
         data = self._get_config_data()
@@ -175,7 +176,6 @@ class FeedBot(BufferingBot):
         self.config = data
         self.config_timestamp = os.stat(self.config_file_name).st_mtime
         self.version = data['version']
-        self.debug_mode = data.get('debug', False)
         return True
 
     def reload(self):
@@ -250,6 +250,8 @@ class FeedBot(BufferingBot):
                 traceback.print_exc()
                 continue
             trace('%s loaded successfully.' % handler['__name__'])
+        if DONT_SEND_ANYTHING:
+            self.autojoin_channels = set()
         for channel in self.channels:
             if channel.decode('utf-8', 'ignore') not in self.autojoin_channels:
                 self.connection.part(channel)
