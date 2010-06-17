@@ -1,10 +1,12 @@
+import calendar
+import datetime 
+import email.utils
 import sys
 import traceback
 import threading
 import time
-import datetime 
-import email.utils
-import calendar
+
+import feedparser
 
 def format_time(timestamp=None):
     if timestamp is None:
@@ -59,4 +61,20 @@ def rfc2timestamp(rfc, default=0):
 
 def tuple2rfc(time_tuple):
     return email.utils.formatdate(calendar.timegm(time_tuple))
+
+def to_datetime(t):
+    if not t:
+        return None
+    if isinstance(t, str):
+        x = email.utils.parsedate(t)
+        if not x:
+            x = feedparser._parse_date(t)
+        t = x
+    if isinstance(t, (tuple, time.struct_time)):
+        t = time.mktime(t)
+    if isinstance(t, (int, float)):
+        t = datetime.datetime.fromtimestamp(t)
+    if not isinstance(t, datetime.datetime):
+        raise ValueError(repr(t))
+    return t
 

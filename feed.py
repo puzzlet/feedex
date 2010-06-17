@@ -12,6 +12,7 @@ import yaml
 
 from BufferingBot import BufferingBot, Message
 
+import feeds
 from util import trace, format_time
 
 DONT_SEND_ANYTHING = False
@@ -200,38 +201,8 @@ class FeedBot(BufferingBot):
                 self.frequent_fetches[fetcher] = enabled
 
     def _reload_feed_handlers(self):
-        handler_names = []
-        import_path = os.path.join(FEEDEX_ROOT, 'feeds')
-        for file_name in os.listdir(import_path):
-            if file_name.endswith('.py') and not file_name.startswith('__'):
-                handler_names.append(file_name[:-3])
-        self.handlers = []
         self.autojoin_channels = set()
-        for handler_name in handler_names:
-            module = self._load_handler_module(handler_name)
-            if module is None:
-                continue
-            self.handlers.append({
-                '__name__': handler_name,
-                'manager': module.manager,
-            })
-
-    def _load_handler_module(self, handler_name):
-        paths = [os.path.join(FEEDEX_ROOT, 'feeds')]
-        try:
-            file_obj, filename, opt = imp.find_module(handler_name, paths)
-        except ImportError:
-            traceback.print_exc()
-            return None
-        try:
-            module = imp.load_module(handler_name, file_obj, filename, opt)
-            return module
-        except Exception:
-            traceback.print_exc()
-        finally:
-            if file_obj:
-                file_obj.close()
-        return None
+        self.handlers = feeds.reload()
 
     def _load_feed_data(self):
         self.feed_iter = None

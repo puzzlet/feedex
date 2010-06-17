@@ -8,13 +8,7 @@ from collections import defaultdict
 
 FILE_PATH = os.path.dirname(__file__)
 
-# dynamically import feeds.general
-# ../feed.py should handle any exception
-_ = imp.find_module('general', [FILE_PATH])
-feeds_general = imp.load_module('general', *_)
-FeedFetcher = feeds_general.FeedFetcher
-EntryFormatter = feeds_general.EntryFormatter
-FeedManager = feeds_general.FeedManager
+from .general import FeedFetcher, EntryFormatter, FeedManager
 
 class TwitterFetcher(FeedFetcher):
     def __init__(self, api, friends=None):
@@ -35,7 +29,8 @@ class TwitterFetcher(FeedFetcher):
                 'text': status.text,
                 'title': status.text, # XXX
                 'link': '', # XXX
-                'updated_parsed': status.created_at,
+                'updated': status.created_at.isoformat(' '),
+                'updated_parsed': status.created_at.timetuple(),
             })
         return entries
 
