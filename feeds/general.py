@@ -201,7 +201,7 @@ class EntryFormatter(object):
             for result in self.digest_entries(entries):
                 yield result
         else:
-            for entry in entries:
+            for entry in entries or []:
                 result = self.format_entry(entry)
                 if result:
                     yield result

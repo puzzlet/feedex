@@ -1,10 +1,12 @@
 #coding: utf-8
-import os.path
-import imp
 import email.utils
 import getpass
-import tweepy
+import imp
+import os.path
+import datetime
 from collections import defaultdict
+
+import tweepy
 
 FILE_PATH = os.path.dirname(__file__)
 
@@ -16,6 +18,7 @@ class TwitterFetcher(FeedFetcher):
             frequent=False)
         self.api = api
         self.cache = {}
+        self.last_fetched = datetime.datetime.now()
         for friend in friends or []:
             self.cache[friend] = FeedFetcher('http://twitter.com/%s' % friend,
                 ignore_time=False, frequent=False)
@@ -35,6 +38,9 @@ class TwitterFetcher(FeedFetcher):
         return entries
 
     def get_fresh_entries(self):
+        limit = datetime.timedelta(seconds=30)
+        if datetime.datetime.now() - self.last_fetched < limit:
+            return None
         all_entries = self.get_entries()
         result = []
         for friend, cache in self.cache.items():
