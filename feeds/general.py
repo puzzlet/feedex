@@ -1,7 +1,6 @@
 #coding: utf-8
 import calendar
 import datetime
-import email.utils
 import os
 import re
 import time
@@ -9,14 +8,12 @@ import traceback
 import urllib.parse
 from collections import defaultdict
 
-import chardet
 import feedparser
 import yaml
 
 from util import limit_time
 from util import rfc2timestamp, tuple2rfc
-from util import to_datetime
-from util import KoreanStandardTime
+from util import LocalTimezone
 
 FILE_PATH = os.path.dirname(__file__)
 FUTURE_THRESHOLD = datetime.timedelta(seconds=86400)
@@ -27,14 +24,17 @@ def get_updated(entry, default=None):
     """Returns updated time of the entry, in unix timestamp.
     default -- current time if None
     """
-    # assuming entry.updated_parsed is in UTC
-    updated = entry.get('updated_parsed', None)
-    if updated:
-        return to_datetime(updated)
+    try:
+        result = entry.get('updated_parsed', None)
+        if result:
+            # assuming entry.updated_parsed is in UTC
+            return calendar.timegm(result)
+    except AttributeError:
+        pass
     if default is not None:
         return default
     else:
-        return datetime.datetime.now()
+        return time.time()
 
 class FeedFetcher(object):
     def __init__(self, uri, ignore_time=False, frequent=False):
@@ -42,8 +42,8 @@ class FeedFetcher(object):
         self.ignore_time = ignore_time
         self.frequent = frequent
         self.etag = ''
-        self.last_modified = None
-        self.last_confirmed = None
+        self.last_modified = 0
+        self.last_confirmed = 0
         self.main_link = ''
         self.entries = []
         self.initialized = False
@@ -61,18 +61,16 @@ class FeedFetcher(object):
             data = yaml.load(open(file_name, 'r'))
         except Exception:
             traceback.print_exc()
-            return
-        if data:
-            self.main_link = str(data.get('link', ''))
-            self.etag = data.get('etag', '')
-            self.last_confirmed = to_datetime(data.get('last-confirmed', None))
-            self.last_modified = to_datetime(data.get('last-modified', None))
-            self.entries = data.get('entries', []) if data else []
-            for entry in self.entries or []:
-                if 'updated' in entry and entry['updated']:
-                    updated = to_datetime(entry['updated'])
-                    if not updated:
-                        del entry['updated']
+        else:
+            if data:
+                self.main_link = str(data.get('link', ''))
+                self.etag = data.get('etag', '')
+                self.last_confirmed = rfc2timestamp(data.get('last-confirmed', None), 0)
+                self.last_modified = rfc2timestamp(data.get('last-modified', None), 0)
+                self.entries = data.get('entries', []) if data else []
+                for entry in self.entries or []:
+                    if 'updated' in entry:
+                        entry['updated'] = email.utils.parsedate(entry['updated'])
         self.initialized = True
 
     def save_cache(self, entries):
@@ -81,15 +79,15 @@ class FeedFetcher(object):
         entries -- save only these entries, to prevent the cache from being
                    flooded with all the older entries.
         """
-        now = datetime.datetime.now() + FUTURE_THRESHOLD
+        now = time.time() + FUTURE_THRESHOLD
         data = {}
         data['uri'] = self.uri
         if self.main_link:
             data['link'] = self.main_link
         if self.last_modified:
-            data['last-modified'] = self.last_modified
+            data['last-modified'] = email.utils.formatdate(self.last_modified)
         if self.last_confirmed:
-            data['last-confirmed'] = self.last_confirmed
+            data['last-confirmed'] = email.utils.formatdate(self.last_confirmed)
         if self.etag:
             data['etag'] = self.etag
         data['entries'] = []
@@ -103,25 +101,24 @@ class FeedFetcher(object):
                 entry_data['title'] = entry['title']
             if 'link' in entry:
                 entry_data['link'] = entry['link']
-            updated = entry.get('updated', entry.get('updated_parsed', None))
-            if updated:
-                entry_data['updated'] = to_datetime(updated)
+            if 'updated_parsed' in entry:
+                entry_data['updated'] = tuple2rfc(entry['updated_parsed'])
             data['entries'].append(entry_data)
         yml = yaml.dump(data,
                         default_flow_style=False,
                         encoding='utf-8',
                         allow_unicode=True)
-        open(self._get_cache_filename(), 'w+').write(yml.decode('utf-8'))
+        open(self._get_cache_filename(), 'wb+').write(yml)
         self.entries = data['entries']
 
     def initialize_cache(self):
-        self.last_confirmed = datetime.datetime.now()
+        self.last_confirmed = time.time()
         self.save_cache([])
         self.initialized = True
 
     def is_entry_fresh(self, entry):
-        if not self.ignore_time and 'updated_parsed' in entry:
-            now = datetime.datetime.now() + FUTURE_THRESHOLD
+        if not self.ignore_time and entry.has_key('updated_parsed'):
+            now = time.time() + FUTURE_THRESHOLD
             return self.last_confirmed < get_updated(entry) < now
         if 'id' in entry:
             return all(entry['id'] != _.get('id', None) for _ in self.entries)
@@ -151,8 +148,9 @@ class FeedFetcher(object):
     def get_fresh_entries(self):
         if not self.initialized:
             self.load_cache()
+        print('here')
         entries = self.get_entries()
-        # XXX remove duplicate
+        # TODO: remove duplicate
         fresh_entries = [_ for _ in entries + (self.entries or [])
             if self.is_entry_fresh(_)]
         if not fresh_entries:
@@ -167,7 +165,7 @@ class FeedFetcher(object):
         self.main_link = feed.get('link', None)
         self.etag = feed.get('etag', None)
         if 'updated' in feed:
-            self.last_modified = to_datetime(feed['updated'])
+            self.last_modified = time.mktime(feed['updated'])
         return feed['entries']
 
     def update_timestamp(self, entries):
@@ -192,7 +190,7 @@ class EntryFormatter(object):
     def format_entry(self, entry):
         msg = self.format % self.build_arguments(entry)
         opt = {
-            'timestamp': time.mktime(get_updated(entry).timetuple())
+            'timestamp': get_updated(entry)
         }
         return (self.target, msg, opt)
 
@@ -237,8 +235,9 @@ class EntryFormatter(object):
         if 'updated_parsed' not in entry:
             result['time'] = 'datetime unknown'
         else:
-            # XXX timezone should be customizable
-            result['time'] = get_updated(entry).isoformat(' ')
+            result['time'] = datetime.datetime.fromtimestamp(
+                get_updated(entry),
+                tz=LocalTimezone()).isoformat(' ')
         if 'title' in entry:
             result['title'] = entry['title'].replace('\n', ' ')
         return result

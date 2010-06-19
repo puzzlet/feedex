@@ -40,7 +40,7 @@ class DiffFormatter(EntryFormatter):
             if tag == 'replace':
                 for sub_a, sub_b in itertools.zip_longest(a[i1:i2], b[j1:j2],
                         fillvalue=''):
-                    line = ''.join(self.format_diff_line(sub_a, sub_b))
+                    line = ''.join(cls.format_diff_line(sub_a, sub_b))
                     if line:
                         yield line
 

@@ -7,6 +7,7 @@ import datetime
 from collections import defaultdict
 
 import tweepy
+tweepy.debug()
 
 FILE_PATH = os.path.dirname(__file__)
 
@@ -38,7 +39,7 @@ class TwitterFetcher(FeedFetcher):
         return entries
 
     def get_fresh_entries(self):
-        limit = datetime.timedelta(seconds=30)
+        limit = datetime.timedelta(minutes=10)
         if datetime.datetime.now() - self.last_fetched < limit:
             return None
         all_entries = self.get_entries()
@@ -58,8 +59,10 @@ class TwitterFetcher(FeedFetcher):
         return result
 
     def update_timestamp(self, entries):
-        for _, cache in self.cache.items():
-            cache.update_timestamp(entries)
+        users = set(_['user'] for _ in entries)
+        for user, cache in self.cache.items():
+            if user in users:
+                cache.update_timestamp(entries)
 
 class TwitterFormatter(EntryFormatter):
     def __init__(self, target, user_names):

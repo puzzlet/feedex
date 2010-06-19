@@ -16,15 +16,32 @@ def format_time(timestamp=None):
 def trace(message):
     print('[%s] %s' % (time.strftime('%m %d %H:%M:%S'), message))
 
-class KoreanStandardTime(datetime.tzinfo):
-    def utcoffset(self, _):
-        return datetime.timedelta(hours=9)
+class LocalTimezone(datetime.tzinfo):
+    ZERO = datetime.timedelta(0)
+    STDOFFSET = datetime.timedelta(seconds=-time.timezone)
+    DSTOFFSET = datetime.timedelta(seconds=-time.altzone)
+    DSTDIFF = DSTOFFSET - STDOFFSET
+    def utcoffset(self, dt):
+        if self._isdst(dt):
+            return self.DSTOFFSET
+        else:
+            return self.STDOFFSET
 
-    def dst(self, _):
-        return datetime.timedelta(0)
+    def dst(self, dt):
+        if self._isdst(dt):
+            return self.DSTDIFF
+        else:
+            return self.ZERO
 
-    def tzname(self, _):
-        return '+0900'
+    def tzname(self, dt):
+        return time.tzname[self._isdst(dt)]
+
+    def _isdst(self, dt):
+        tt = (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second,
+              dt.weekday(), 0, -1)
+        stamp = time.mktime(tt)
+        tt = time.localtime(stamp)
+        return tt.tm_isdst > 0
 
 class TimedOutException(Exception):
     def __init__(self, value = "Timed Out"):
@@ -62,19 +79,31 @@ def rfc2timestamp(rfc, default=0):
 def tuple2rfc(time_tuple):
     return email.utils.formatdate(calendar.timegm(time_tuple))
 
-def to_datetime(t):
+class timezone(datetime.tzinfo):
+    def __init__(self, td):
+        self.td = td
+
+    def utcoffset(self, dt):
+        return self.td
+
+    def dst(self, dt): 
+        return datetime.timedelta(0)
+
+UTC = timezone(datetime.timedelta(0))
+
+def to_datetime(t, tzinfo=None):
     if not t:
         return None
     if isinstance(t, str):
-        x = email.utils.parsedate(t)
-        if not x:
-            x = feedparser._parse_date(t)
-        t = x
+        t = datetime.datetime(*feedparser._parse_date(t)[:6], tzinfo=UTC)
+    tz = tzinfo or LocalTimezone()
     if isinstance(t, (tuple, time.struct_time)):
-        t = time.mktime(t)
+        t = datetime.datetime(*t[:6], tzinfo=tz)
     if isinstance(t, (int, float)):
-        t = datetime.datetime.fromtimestamp(t)
+        t = datetime.datetime.fromtimestamp(t, tz=tz)
     if not isinstance(t, datetime.datetime):
         raise ValueError(repr(t))
+    if not t.tzinfo:
+        t = datetime.datetime(*t.timetuple()[:6], tzinfo=tz)
     return t
 

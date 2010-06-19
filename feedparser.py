@@ -10,7 +10,7 @@ Required: Python 3.0 or later
 Recommended: Python 3.1 or later
 """
 
-__version__ = "4.2-pre-" + "$Revision: 311 $"[11:14] + "-svn"
+__version__ = "4.2-pre-" + "$Revision: 312 $"[11:14] + "-svn"
 __license__ = """Copyright (c) 2002-2008, Mark Pilgrim, All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification,
@@ -131,13 +131,10 @@ from html.entities import name2codepoint, codepoint2name
 # feedparser is tested with BeautifulSoup 3.0.x, but it might work with the
 # older 2.x series.  If it doesn't, and you can figure out why, I'll accept a
 # patch and modify the compatibility statement accordingly.
-#try:
-#    import BeautifulSoup
-#except:
-#    BeautifulSoup = None
-
-# Not using BeautifulSoup until it's stabilized with Python 3.
-BeautifulSoup = None
+try:
+    import BeautifulSoup
+except:
+    BeautifulSoup = None
 
 # ---------- don't touch these ----------
 class ThingsNobodyCaresAboutButMe(Exception): pass
@@ -192,23 +189,6 @@ class SGMLParser(html.parser.HTMLParser):
         self.nomoretags = 0
         self.literal = 0
         html.parser.HTMLParser.reset(self)
-
-    def setnomoretags(self):
-        """Enter literal mode (CDATA) till EOF.
-
-        Intended for derived classes only.
-        """
-        self.nomoretags = self.literal = 1
-
-    def setliteral(self, *args):
-        """Enter literal mode (CDATA).
-
-        Intended for derived classes only.
-        """
-        self.literal = 1
-
-    def feed(self, data):
-        html.parser.HTMLParser.feed(self, str(data, self.encoding))
 
     # Internal -- handle data as far as reasonable.  May leave state
     # and data to be processed by a subsequent call.  If 'end' is
@@ -314,9 +294,6 @@ class SGMLParser(html.parser.HTMLParser):
             i = n
         self.rawdata = rawdata[i:]
         # XXX if end: check for empty stack
-
-    # Extensions for the DOCTYPE scanner:
-    _decl_otherchars = '='
 
     # Internal -- parse processing instr, return length or -1 if not terminated
     def parse_pi(self, i):
@@ -426,21 +403,17 @@ class SGMLParser(html.parser.HTMLParser):
     # Internal -- finish processing of start tag
     # Return -1 for unknown tag, 0 for open-only tag, 1 for balanced tag
     def finish_starttag(self, tag, attrs):
-        try:
-            method = getattr(self, 'start_' + tag)
-        except AttributeError:
-            try:
-                method = getattr(self, 'do_' + tag)
-            except AttributeError:
-                self.unknown_starttag(tag, attrs)
-                return -1
-            else:
-                self.handle_starttag(tag, method, attrs)
-                return 0
-        else:
+        method = getattr(self, 'start_' + tag, None)
+        if method:
             self.stack.append(tag)
-            self.handle_starttag(tag, method, attrs)
+            method(tag, attrs)
             return 1
+        method = getattr(self, 'do_' + tag, None)
+        if method:
+            method(tag, attrs)
+            return 0
+        self.unknown_starttag(tag, attrs)
+        return -1
 
     # Internal -- finish processing of end tag
     def finish_endtag(self, tag):
@@ -451,35 +424,19 @@ class SGMLParser(html.parser.HTMLParser):
                 return
         else:
             if tag not in self.stack:
-                try:
-                    method = getattr(self, 'end_' + tag)
-                except AttributeError:
-                    self.unknown_endtag(tag)
-                else:
+                if getattr(self, 'end_' + tag, None):
                     self.report_unbalanced(tag)
+                else:
+                    self.unknown_endtag(tag)
                 return
             found = len(self.stack)
             for i in range(found):
                 if self.stack[i] == tag: found = i
         while len(self.stack) > found:
             tag = self.stack[-1]
-            try:
-                method = getattr(self, 'end_' + tag)
-            except AttributeError:
-                method = None
-            if method:
-                self.handle_endtag(tag, method)
-            else:
-                self.unknown_endtag(tag)
+            method = getattr(self, 'end_' + tag, self.unknown_endtag)
+            method(tag)
             del self.stack[-1]
-
-    # Overridable -- handle start tag
-    def handle_starttag(self, tag, method, attrs):
-        method(attrs)
-
-    # Overridable -- handle end tag
-    def handle_endtag(self, tag, method):
-        method()
 
     # Example -- report an unbalanced </...> tag.
     def report_unbalanced(self, tag):
@@ -495,18 +452,7 @@ class SGMLParser(html.parser.HTMLParser):
             return
         if not 0 <= n <= 127:
             return
-        return self.convert_codepoint(n)
-
-    def convert_codepoint(self, codepoint):
-        return chr(codepoint)
-
-    def handle_charref(self, name):
-        """Handle character reference, no need to override."""
-        replacement = self.convert_charref(name)
-        if replacement is None:
-            self.unknown_charref(name)
-        else:
-            self.handle_data(replacement)
+        return chr(n)
 
     # Definition of entities -- derived classes may override
     entitydefs = \
@@ -518,25 +464,7 @@ class SGMLParser(html.parser.HTMLParser):
         As an alternative to overriding this method; one can tailor the
         results by setting up the self.entitydefs mapping appropriately.
         """
-        table = self.entitydefs
-        if name in table:
-            return table[name]
-        else:
-            return
-
-    def handle_entityref(self, name):
-        """Handle entity references, no need to override."""
-        replacement = self.convert_entityref(name)
-        if replacement is None:
-            self.unknown_entityref(name)
-        else:
-            self.handle_data(replacement)
-
-    # To be overridden -- handlers for unknown objects
-    def unknown_starttag(self, tag, attrs): pass
-    def unknown_endtag(self, tag): pass
-    def unknown_charref(self, ref): pass
-    def unknown_entityref(self, ref): pass
+        return self.entitydefs.get(name, None)
 
 SUPPORTED_VERSIONS = {'': 'unknown',
                       'rss090': 'RSS 0.90',
@@ -557,7 +485,7 @@ SUPPORTED_VERSIONS = {'': 'unknown',
                       'hotrss': 'Hot RSS'
                       }
 
-from collections import UserDict
+UserDict = dict
 
 class FeedParserDict(UserDict):
     keymap = {'channel': 'feed',
@@ -575,29 +503,26 @@ class FeedParserDict(UserDict):
               'copyright_detail': 'rights_detail',
               'tagline': 'subtitle',
               'tagline_detail': 'subtitle_detail'}
-    def __missing__(self, key):
+    def __getitem__(self, key):
         if key == 'category':
-            return self['tags'][0]['term']
+            return UserDict.__getitem__(self, 'tags')[0]['term']
         if key == 'enclosures':
             norel = lambda link: FeedParserDict([(name,value) for (name,value) in link.items() if name!='rel'])
-            return [norel(link) for link in self['links'] if link['rel']=='enclosure']
+            return [norel(link) for link in UserDict.__getitem__(self, 'links') if link['rel']=='enclosure']
         if key == 'license':
-            for link in self['links']:
+            for link in UserDict.__getitem__(self, 'links'):
                 if link['rel']=='license' and 'href' in link:
                     return link['href']
         if key == 'categories':
-            return [(tag['scheme'], tag['term']) for tag in self['tags']]
+            return [(tag['scheme'], tag['term']) for tag in UserDict.__getitem__(self, 'tags')]
         realkey = self.keymap.get(key, key)
         if isinstance(realkey, list):
             for k in realkey:
-                if k in self:
-                    return self[k]
-            raise KeyError(realkey)
-        if key in self:
-            return self[key]
-        if realkey in self:
-            return self[realkey]
-        raise KeyError(realkey)
+                if super().__contains__(k):
+                    return UserDict.__getitem__(self, k)
+        if super().__contains__(key):
+            return UserDict.__getitem__(self, key)
+        return UserDict.__getitem__(self, realkey)
 
     def __setitem__(self, key, value):
         for k in self.keymap.keys():
@@ -618,9 +543,9 @@ class FeedParserDict(UserDict):
             self[key] = value
         return self[key]
         
-    def has_key(self, key):
+    def __contains__(self, key):
         try:
-            return hasattr(self, key) or UserDict.has_key(self, key)
+            return hasattr(self, key) or UserDict.__contains__(self, key)
         except AttributeError:
             return False
         
@@ -710,8 +635,8 @@ def _urljoin(base, uri):
     try:
         return urllib.parse.urljoin(base, uri)
     except:
-        uri = urlparse.parse.urlunparse([urllib.quote(part) for part in urlparse.parse.urlparse(uri)])
-        return urlparse.parse.urljoin(base, uri)
+        uri = urllib.parse.urlunparse([urllib.quote(part) for part in urllib.parse.urlparse(uri)])
+        return urllib.parse.urljoin(base, uri)
 
 class _FeedParserMixin:
     namespaces = {'': '',
@@ -1218,21 +1143,21 @@ class _FeedParserMixin:
     # text, but this is routinely ignored.  This is an attempt to detect
     # the most common cases.  As false positives often result in silent
     # data loss, this function errs on the conservative side.
-    def lookslikehtml(self, str_):
+    def lookslikehtml(self, str):
         if self.version.startswith('atom'): return
         if self.contentparams.get('type','text/html') != 'text/plain': return
 
         # must have a close tag or a entity reference to qualify
-        if not (re.search(r'</(\w+)>',str_) or re.search("&#?\w+;",str_)): return
+        if not (re.search(r'</(\w+)>',str) or re.search("&#?\w+;",str)): return
 
         # all tags must be in a restricted subset of valid HTML tags
         if any(t.lower() not in _HTMLSanitizer.acceptable_elements for t in
-            re.findall(r'</?(\w+)',str_)): return
+            re.findall(r'</?(\w+)',str)): return
 
         # all entities must have been defined as valid HTML entities
         from html.entities import entitydefs
         if any(e not in entitydefs.keys() for e in
-            re.findall(r'&(\w+);',str_)): return
+            re.findall(r'&(\w+);',str)): return
 
         return 1
 
@@ -1476,7 +1401,7 @@ class _FeedParserMixin:
     def _getContext(self):
         if self.insource:
             context = self.sourcedata
-        elif self.inimage:
+        elif self.inimage and 'image' in self.feeddata:
             context = self.feeddata['image']
         elif self.intextinput:
             context = self.feeddata['textinput']
@@ -2058,13 +1983,11 @@ class _BaseHTMLProcessor(SGMLParser):
         return j
 
     def feed(self, data):
-        data = re.compile('<!((?!DOCTYPE|--|\[))', re.IGNORECASE).sub('&lt;!\\1', data)
+        data = re.compile(r'<!((?!DOCTYPE|--|\[))', re.IGNORECASE).sub(r'&lt;!\1', data)
         #data = re.sub(r'<(\S+?)\s*?/>', self._shorttag_replace, data) # bug [ 1399464 ] Bad regexp for _shorttag_replace
-        data = re.sub('<([^<>\s]+?)\s*/>', self._shorttag_replace, data) 
+        data = re.sub(r'<([^<>\s]+?)\s*/>', self._shorttag_replace, data) 
         data = data.replace('&#39;', "'")
         data = data.replace('&#34;', '"')
-        if self.encoding and isinstance(data, str):
-            data = data.encode(self.encoding)
         SGMLParser.feed(self, data)
         SGMLParser.close(self)
 
@@ -2248,7 +2171,7 @@ class _MicroformatsParser:
         return sFolded
 
     def normalize(self, s):
-        return re.sub(r'\s+', ' ', s).strip()
+        return re.sub('\s+', ' ', s).strip()
     
     def unique(self, aList):
         results = []
@@ -2329,7 +2252,7 @@ class _MicroformatsParser:
             if sValue:
                 sValue = bNormalize and self.normalize(sValue) or sValue.strip()
             if not sValue:
-                sValue = elmResult.renderContents()
+                sValue = elmResult.renderContents(encoding=None)
                 sValue = re.sub(r'<\S[^>]*>', '', sValue)
                 sValue = sValue.replace('\r\n', '\n')
                 sValue = sValue.replace('\r', '\n')
@@ -2569,7 +2492,7 @@ class _MicroformatsParser:
            linktype.startswith('video/') or \
            (linktype.startswith('application/') and not linktype.endswith('xml')):
             return 1
-        path = urlparse.urlparse(attrsD['href'])[2]
+        path = urllib.parse.urlparse(attrsD['href'])[2]
         if path.find('.') == -1: return 0
         fileext = path.split('.').pop().lower()
         return fileext in self.known_binary_extensions
@@ -2580,12 +2503,12 @@ class _MicroformatsParser:
             href = elm.get('href')
             if not href: continue
             urlscheme, domain, path, params, query, fragment = \
-                       urlparse.urlparse(_urljoin(self.baseuri, href))
+                       urllib.parse.urlparse(_urljoin(self.baseuri, href))
             segments = path.split('/')
             tag = segments.pop()
             if not tag:
                 tag = segments.pop()
-            tagscheme = urlparse.urlunparse((urlscheme, domain, '/'.join(segments), '', '', ''))
+            tagscheme = urllib.parse.urlunparse((urlscheme, domain, '/'.join(segments), '', '', ''))
             if not tagscheme.endswith('/'):
                 tagscheme += '/'
             self.tags.append(FeedParserDict({"term": tag, "scheme": tagscheme, "label": elm.string or ''}))
@@ -3044,7 +2967,7 @@ def _open_resource(url_file_stream_or_string, etag, modified, agent, referrer, h
 
         # iri support
         try:
-            if isinstance(url_file_stream_or_string,str):
+            if isinstance(url_file_stream_or_string, str):
                 url_file_stream_or_string = url_file_stream_or_string.encode('idna')
             else:
                 url_file_stream_or_string = url_file_stream_or_string.decode('utf-8').encode('idna')
@@ -3512,7 +3435,6 @@ def _parse_date(dateString):
                 if _debug: sys.stderr.write('date handler function must return 9-tuple\n')
                 raise ValueError
             map(int, date9tuple)
-            if _debug: sys.stderr.write('%s succeeded.\n' % handler.__name__)
             return date9tuple
         except Exception as e:
             if _debug: sys.stderr.write('%s raised %s\n' % (handler.__name__, repr(e)))

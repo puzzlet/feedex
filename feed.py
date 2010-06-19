@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 # -*- encoding: utf-8 -*-
+import datetime
+import imp
+import itertools
 import os
 import sys
-import imp
-import datetime
-import itertools
+import time
 import traceback
 from collections import defaultdict
 
@@ -13,7 +14,7 @@ import yaml
 from BufferingBot import BufferingBot, Message
 
 import feeds
-from util import trace, format_time
+from util import trace, format_time, to_datetime, LocalTimezone
 
 DONT_SEND_ANYTHING = False
 
@@ -120,18 +121,15 @@ class FeedBot(BufferingBot):
         try:
             entries = fetcher.get_fresh_entries()
         except Exception:
-            print('An error occured while trying to get %s:' % fetcher.uri)
+            trace('An error occured while trying to get %s:' % fetcher.uri)
             traceback.print_exc(limit=None)
             return
         for formatter in self.feeds[fetcher]:
             try:
-                timestamps = []
                 for target, msg, opt in formatter.format_entries(entries):
-                    timestamp = opt.get('timestamp', None)
-                    timestamps.append(timestamp or 0)
                     assert isinstance(target, str)
                     assert isinstance(msg, str)
-                    dt = datetime.datetime.fromtimestamp(timestamp or 0)
+                    dt = datetime.datetime.fromtimestamp(opt.get('timestamp', 0))
                     message = Message('privmsg', (target, msg), timestamp=dt)
                     self.push_message(message)
             except Exception:
@@ -152,7 +150,7 @@ class FeedBot(BufferingBot):
 
     def pop_buffer(self, message_buffer):
         earliest = message_buffer.peek().timestamp
-        if earliest > datetime.datetime.now():
+        if earliest > time.time():
             # 미래에 보여줄 것은 미래까지 기다림
             # TODO: ignore_time이면 이 조건 무시
             return False
@@ -160,11 +158,11 @@ class FeedBot(BufferingBot):
         return True
 
     def dump_buffer(self):
-        with open(self.buffer_file_name, 'wb') as fp:
-            yaml.dump(list(self.buffer.dump()), stream=fp,
-                default_flow_style=False,
-                encoding='utf-8',
-                allow_unicode=True)
+        dump = yaml.dump(list(self.buffer.dump()),
+            default_flow_style=False,
+            encoding='utf-8',
+            allow_unicode=True)
+        open(self.buffer_file_name, 'wb').write(dump)
 
     def push_message(self, message):
         BufferingBot.push_message(self, message)
