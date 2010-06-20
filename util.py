@@ -13,7 +13,8 @@ def format_time(timestamp=None):
         return time.strftime('%m %d %H:%M:%S')
     return time.strftime('%m %d %H:%M:%S', time.localtime(timestamp))
 
-def trace(message):
+def trace(*message):
+    message = ' '.join(str(_) for _ in message)
     print('[%s] %s' % (time.strftime('%m %d %H:%M:%S'), message))
 
 class LocalTimezone(datetime.tzinfo):

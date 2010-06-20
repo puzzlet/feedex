@@ -14,9 +14,7 @@ import yaml
 from BufferingBot import BufferingBot, Message
 
 import feeds
-from util import trace, format_time, to_datetime, LocalTimezone
-
-DONT_SEND_ANYTHING = False
+from util import trace, to_datetime, LocalTimezone
 
 class FeedBot(BufferingBot):
     def __init__(self, config_file_name):
@@ -25,6 +23,7 @@ class FeedBot(BufferingBot):
         self.buffer_file_name = os.path.join(FEEDEX_ROOT, 'buffer.yml')
         self.version = -1
         self.config_timestamp = -1
+        self.debug_mode = False
         self.load()
 
         server = self.config['server']
@@ -129,8 +128,8 @@ class FeedBot(BufferingBot):
                 for target, msg, opt in formatter.format_entries(entries):
                     assert isinstance(target, str)
                     assert isinstance(msg, str)
-                    dt = datetime.datetime.fromtimestamp(opt.get('timestamp', 0))
-                    message = Message('privmsg', (target, msg), timestamp=dt)
+                    message = Message('privmsg', (target, msg),
+                        timestamp=opt.get('timestamp', 0))
                     self.push_message(message)
             except Exception:
                 print('An error occured while trying to format an entries from %s:' % fetcher.uri)
@@ -144,21 +143,27 @@ class FeedBot(BufferingBot):
                 traceback.print_exc(limit=None)
                 return
 
-    def flood_control(self):
-        if BufferingBot.flood_control(self):
-            self.dump_buffer()
-
     def pop_buffer(self, message_buffer):
         earliest = message_buffer.peek().timestamp
         if earliest > time.time():
             # 미래에 보여줄 것은 미래까지 기다림
             # TODO: ignore_time이면 이 조건 무시
             return False
-        BufferingBot.pop_buffer(self, message_buffer)
-        return True
+        if self.debug_mode:
+            result = self.process_message(message_buffer.pop())
+        else:
+            result = BufferingBot.pop_buffer(self, message_buffer)
+        if result:
+            self.dump_buffer()
+
+    def process_message(self, message):
+        trace(message.command, ' '.join(message.arguments))
+        if self.debug_mode:
+            return True
+        return BufferingBot.process_message(self, message)
 
     def dump_buffer(self):
-        dump = yaml.dump(list(self.buffer.dump()),
+        dump = yaml.dump(list(self.message_buffer.dump()),
             default_flow_style=False,
             encoding='utf-8',
             allow_unicode=True)
@@ -175,6 +180,7 @@ class FeedBot(BufferingBot):
         self.config = data
         self.config_timestamp = os.stat(self.config_file_name).st_mtime
         self.version = data['version']
+        self.debug_mode = data.get('debug', False)
         return True
 
     def reload(self):
@@ -219,7 +225,7 @@ class FeedBot(BufferingBot):
                 traceback.print_exc()
                 continue
             trace('%s loaded successfully.' % handler['__name__'])
-        if DONT_SEND_ANYTHING:
+        if self.debug_mode:
             self.autojoin_channels = set()
         for channel in self.channels:
             if channel.decode('utf-8', 'ignore') not in self.autojoin_channels:

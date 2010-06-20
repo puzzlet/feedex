@@ -33,7 +33,7 @@ class DiffFormatter(EntryFormatter):
                 continue
             if tag == 'delete':
                 for line in a[i1:i2]:
-                    yield '\x0314{0}\x03'.format(line)
+                    yield '\x0304{0}\x03'.format(line)
             if tag == 'insert':
                 for line in b[j1:j2]:
                     yield '\x0303{0}\x03'.format(line)
@@ -54,7 +54,7 @@ class DiffFormatter(EntryFormatter):
             if tag == 'equal':
                 yield ''.join(b[j1:j2])
             if tag in ['delete', 'replace']:
-                yield '\x0314{0}\x03\x02\x02'.format(''.join(a[i1:i2]))
+                yield '\x0304{0}\x03\x02\x02'.format(''.join(a[i1:i2]))
             if tag in ['insert', 'replace']:
                 yield '\x0303{0}\x03\x02\x02'.format(''.join(b[j1:j2]))
 

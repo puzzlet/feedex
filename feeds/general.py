@@ -1,6 +1,7 @@
 #coding: utf-8
 import calendar
 import datetime
+import email.utils
 import os
 import re
 import time
@@ -16,7 +17,7 @@ from util import rfc2timestamp, tuple2rfc
 from util import LocalTimezone
 
 FILE_PATH = os.path.dirname(__file__)
-FUTURE_THRESHOLD = datetime.timedelta(seconds=86400)
+FUTURE_THRESHOLD = seconds=86400
 TIMEOUT_THRESHOLD = 30
 MAX_CHAR = 300
 
@@ -59,18 +60,17 @@ class FeedFetcher(object):
             return
         try:
             data = yaml.load(open(file_name, 'r'))
-        except Exception:
-            traceback.print_exc()
-        else:
             if data:
                 self.main_link = str(data.get('link', ''))
-                self.etag = data.get('etag', '')
-                self.last_confirmed = rfc2timestamp(data.get('last-confirmed', None), 0)
-                self.last_modified = rfc2timestamp(data.get('last-modified', None), 0)
                 self.entries = data.get('entries', []) if data else []
                 for entry in self.entries or []:
                     if 'updated' in entry:
                         entry['updated'] = email.utils.parsedate(entry['updated'])
+                self.last_confirmed = rfc2timestamp(data.get('last-confirmed', None), 0)
+                self.last_modified = rfc2timestamp(data.get('last-modified', None), 0)
+                self.etag = data.get('etag', '')
+        except Exception:
+            traceback.print_exc()
         self.initialized = True
 
     def save_cache(self, entries):
@@ -94,13 +94,7 @@ class FeedFetcher(object):
         for entry in entries:
             if not self.ignore_time and get_updated(entry) > now:
                 continue
-            entry_data = {}
-            if 'id' in entry:
-                entry_data['id'] = entry['id']
-            if 'title' in entry:
-                entry_data['title'] = entry['title']
-            if 'link' in entry:
-                entry_data['link'] = entry['link']
+            entry_data = entry.copy()
             if 'updated_parsed' in entry:
                 entry_data['updated'] = tuple2rfc(entry['updated_parsed'])
             data['entries'].append(entry_data)
@@ -117,7 +111,7 @@ class FeedFetcher(object):
         self.initialized = True
 
     def is_entry_fresh(self, entry):
-        if not self.ignore_time and entry.has_key('updated_parsed'):
+        if not self.ignore_time and 'updated_parsed' in entry:
             now = time.time() + FUTURE_THRESHOLD
             return self.last_confirmed < get_updated(entry) < now
         if 'id' in entry:
@@ -139,7 +133,7 @@ class FeedFetcher(object):
             if self.etag:
                 kwargs['etag'] = self.etag
             if self.last_modified:
-                kwargs['modified'] = self.last_modified.timetuple()
+                kwargs['modified'] = time.gmtime(self.last_modified)
             return feedparser.parse(self.uri, **kwargs)
         except Exception:
             print('An error occured while trying to get %s:' % self.uri)
@@ -148,7 +142,6 @@ class FeedFetcher(object):
     def get_fresh_entries(self):
         if not self.initialized:
             self.load_cache()
-        print('here')
         entries = self.get_entries()
         # TODO: remove duplicate
         fresh_entries = [_ for _ in entries + (self.entries or [])
