@@ -9,6 +9,7 @@ import time
 import traceback
 from collections import defaultdict
 
+import irclib
 import yaml
 
 from BufferingBot import BufferingBot, Message
@@ -41,7 +42,6 @@ class FeedBot(BufferingBot):
         self.initialized = False
         self.connection.add_global_handler('welcome', self._on_connected)
 
-        self.autojoin_channels = set()
         self.feeds = defaultdict(list)
         self.feed_iter = itertools.cycle(self.feeds)
         self.handlers = []
@@ -76,11 +76,6 @@ class FeedBot(BufferingBot):
 
     def _on_connected(self, conn, _):
         trace('Connected.')
-        try:
-            for channel in self.autojoin_channels:
-                self.connection.join(channel.encode('utf-8'))
-        except: #TODO: specify exception here
-            pass
         if self.initialized:
             return
         if conn != self.connection:
@@ -143,18 +138,24 @@ class FeedBot(BufferingBot):
                 traceback.print_exc(limit=None)
                 return
 
+    def flood_control(self):
+        if BufferingBot.flood_control(self):
+            self.dump_buffer()
+
     def pop_buffer(self, message_buffer):
-        earliest = message_buffer.peek().timestamp
-        if earliest > time.time():
+        message = message_buffer.peek()
+        if message.timestamp > time.time():
             # 미래에 보여줄 것은 미래까지 기다림
             # TODO: ignore_time이면 이 조건 무시
             return False
         if self.debug_mode:
-            result = self.process_message(message_buffer.pop())
-        else:
-            result = BufferingBot.pop_buffer(self, message_buffer)
-        if result:
-            self.dump_buffer()
+            return self.process_message(message_buffer.pop())
+        if message.command in ['privmsg']:
+            target = message.arguments[0]
+            chan = irclib.irc_lower(self.codec.encode(target)[0])
+            if chan not in self.channels and irclib.is_channel(chan):
+                self.connection.join(chan)
+        return BufferingBot.pop_buffer(self, message_buffer)
 
     def process_message(self, message):
         trace(message.command, ' '.join(message.arguments))
@@ -196,40 +197,28 @@ class FeedBot(BufferingBot):
         self._reload_feed_handlers()
         self._reload_feed_data()
         if self.initialized:
-            for channel in self.autojoin_channels:
-                channel = channel.encode('utf-8')
-                if channel not in self.channels:
-                    self.connection.join(channel)
             for fetcher, enabled in self.frequent_fetches.items():
                 self.ircobj.execute_delayed(0, self.frequent_fetch, (fetcher,))
                 self.frequent_fetches[fetcher] = enabled
 
     def _reload_feed_handlers(self):
-        self.autojoin_channels = set()
         self.handlers = feeds.reload()
 
     def _load_feed_data(self):
         self.feed_iter = None
         self.feeds = defaultdict(list)
-        self.autojoin_channels = set()
         self.frequent_fetches = {}
         for handler in self.handlers:
             manager = handler['manager']
             try:
                 for fetcher, formatter in manager.load():
                     self.feeds[fetcher].append(formatter)
-                    self.autojoin_channels.add(formatter.target)
                     if fetcher.frequent:
                         self.frequent_fetches[fetcher] = True
             except Exception:
                 traceback.print_exc()
                 continue
             trace('%s loaded successfully.' % handler['__name__'])
-        if self.debug_mode:
-            self.autojoin_channels = set()
-        for channel in self.channels:
-            if channel.decode('utf-8', 'ignore') not in self.autojoin_channels:
-                self.connection.part(channel)
 
     def _reload_feed_data(self):
         self._load_feed_data()

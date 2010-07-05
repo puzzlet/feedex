@@ -4,6 +4,7 @@ import getpass
 import imp
 import os.path
 import datetime
+import traceback
 from collections import defaultdict
 
 import tweepy
@@ -18,13 +19,23 @@ class TwitterFetcher(FeedFetcher):
             frequent=False)
         self.api = api
         self.cache = {}
-        self.last_fetched = datetime.datetime.now()
+        self.next_fetch = datetime.datetime.now()
+        self.fetch_period = datetime.timedelta(seconds=180)
         for friend in friends or []:
             self.cache[friend] = FeedFetcher('http://twitter.com/%s' % friend,
                 ignore_time=False, frequent=False)
 
     def get_entries(self):
-        timeline = self.api.friends_timeline()
+        try:
+            timeline = self.api.friends_timeline()
+        except tweepy.error.TweepError as e:
+            traceback.print_exc()
+            self.fetch_period *= 2
+            self.next_fetch += self.fetch_period
+            print(self.fetch_period)
+            return
+        self.fetch_period = datetime.timedelta(seconds=180)
+        self.next_fetch = datetime.datetime.now() + self.fetch_period
         entries = []
         for status in timeline:
             entries.append({
@@ -38,8 +49,7 @@ class TwitterFetcher(FeedFetcher):
         return entries
 
     def get_fresh_entries(self):
-        limit = datetime.timedelta(minutes=10)
-        if datetime.datetime.now() - self.last_fetched < limit:
+        if datetime.datetime.now() < self.next_fetch:
             return None
         all_entries = self.get_entries()
         result = []
@@ -64,20 +74,20 @@ class TwitterFetcher(FeedFetcher):
                 cache.update_timestamp(entries)
 
 class TwitterFormatter(EntryFormatter):
-    def __init__(self, target, user_names):
-        super(TwitterFormatter, self).__init__(
-            target=target,
-            message_format='%(user)s: %(title)s (%(time)s)'
-        )
-        self.user_names = user_names
+    def __init__(self, targets, user_names):
+        EntryFormatter.__init__(
+            self,
+            targets=targets,
+            message_format='%(user)s: %(title)s (%(time)s)')
+        self.user_names = [_.lower() for _ in user_names]
 
     def format_entry(self, entry):
-        if entry['user'] not in self.user_names:
+        if entry['user'].lower() not in self.user_names:
             return
-        return super(TwitterFormatter, self).format_entry(entry)
+        return EntryFormatter.format_entry(self, entry)
 
     def build_arguments(self, entry):
-        result = super(TwitterFormatter, self).build_arguments(entry)
+        result = EntryFormatter.build_arguments(self, entry)
         result['user'] = entry['user']
         return result
 
@@ -126,13 +136,12 @@ class TwitterManager(FeedManager):
                     user_names.add(user_name)
             for user in entry.get('user', []):
                 user_names.add(user)
-            for target in entry['targets']:
-                formatter = self.formatter_class(
-                    target=target.strip(),
-                    user_names=user_names)
-                for user in data['user']:
-                    yield (self.fetcher[user], formatter)
-                    # XXX duplicate entries when multiple data['user']
+            formatter = self.formatter_class(
+                targets=entry['targets'],
+                user_names=user_names)
+            for user in data['user']:
+                yield (self.fetcher[user], formatter)
+                # XXX duplicate entries when multiple data['user']
 
     def reload(self):
         pass # TODO

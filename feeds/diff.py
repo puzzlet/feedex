@@ -5,8 +5,9 @@ import re
 from .general import EntryFormatter
 
 class DiffFormatter(EntryFormatter):
-    def __init__(self, target, message_format='%(title)s'):
-        EntryFormatter.__init__(self, target=target, message_format=message_format)
+    def __init__(self, targets, message_format='%(title)s'):
+        EntryFormatter.__init__(self, targets=targets,
+            message_format=message_format)
         self.last_message = ''
 
     def format_entries(self, entries):
@@ -19,7 +20,8 @@ class DiffFormatter(EntryFormatter):
             self.last_message = message
             generator = message.split('\n')
         for line in generator:
-            yield (self.target, line, {})
+            for target in self.targets:
+                yield (target, line, {})
         self.last_message = message
 
     @classmethod
@@ -40,7 +42,7 @@ class DiffFormatter(EntryFormatter):
             if tag == 'replace':
                 for sub_a, sub_b in itertools.zip_longest(a[i1:i2], b[j1:j2],
                         fillvalue=''):
-                    line = ''.join(cls.format_diff_line(sub_a, sub_b))
+                    line = cls.format_diff_line(sub_a, sub_b)
                     if line:
                         yield line
 
@@ -50,11 +52,13 @@ class DiffFormatter(EntryFormatter):
         a = re.split(r'(\s+)', str1)
         b = re.split(r'(\s+)', str2)
         diff = difflib.SequenceMatcher(None, a, b)
+        result = []
         for tag, i1, i2, j1, j2 in diff.get_opcodes():
             if tag == 'equal':
-                yield ''.join(b[j1:j2])
+                result.append(''.join(b[j1:j2]))
             if tag in ['delete', 'replace']:
-                yield '\x0304{0}\x03\x02\x02'.format(''.join(a[i1:i2]))
+                result.append('\x0304{0}\x03\x02\x02'.format(''.join(a[i1:i2])))
             if tag in ['insert', 'replace']:
-                yield '\x0303{0}\x03\x02\x02'.format(''.join(b[j1:j2]))
+                result.append('\x0303{0}\x03\x02\x02'.format(''.join(b[j1:j2])))
+        return ''.join(result)
 

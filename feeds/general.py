@@ -172,20 +172,25 @@ class FeedFetcher(object):
 class EntryFormatter(object):
     """format feed entry into an irc packet."""
 
-    def __init__(self, target, message_format, arguments=None, digest=False):
-        assert isinstance(target, str)
-        assert isinstance(message_format, str)
-        self.target = target
-        self.format = message_format
+    def __init__(self, targets, message_format, arguments=None, digest=False,
+            exclude=[]):
+        self.targets = targets
+        if not isinstance(self.targets, list):
+            self.targets = [self.targets]
+        self.message_format = message_format
         self.arguments = arguments or {}
         self.digest = digest
+        self.exclude = exclude
 
     def format_entry(self, entry):
-        msg = self.format % self.build_arguments(entry)
+        for pattern in self.exclude:
+            if re.match(pattern, entry['title']):
+                return
+        msg = self.message_format % self.build_arguments(entry)
         opt = {
             'timestamp': get_updated(entry)
         }
-        return (self.target, msg, opt)
+        return (msg, opt)
 
     def format_entries(self, entries):
         if self.digest:
@@ -193,9 +198,12 @@ class EntryFormatter(object):
                 yield result
         else:
             for entry in entries or []:
-                result = self.format_entry(entry)
-                if result:
-                    yield result
+                x = self.format_entry(entry)
+                if not x:
+                    continue
+                message, opt = x
+                for target in self.targets:
+                    yield target, message, opt
 
     def digest_entries(self, entries):
         msg_buffer = ''
@@ -210,15 +218,18 @@ class EntryFormatter(object):
                 continue
             msg = '\x02%s\x02' % title
             if len(msg_buffer) + len(delimiter) + len(msg) > MAX_CHAR:
-                yield (self.target, msg_buffer, {})
+                for target in self.targets:
+                    yield (target, msg_buffer, {})
                 msg_buffer = ''
             msg_buffer += delimiter if msg_buffer else '[%(name)s]' % args # XXX
             msg_buffer += msg
             if len(msg_buffer) > MAX_CHAR:
-                yield (self.target, msg_buffer, {})
+                for target in self.targets:
+                    yield (target, msg_buffer, {})
                 msg_buffer = ''
         if msg_buffer:
-            yield (self.target, msg_buffer, {})
+            for target in self.targets:
+                yield (target, msg_buffer, {})
 
     def build_arguments(self, entry):
         result = defaultdict(str)
@@ -259,14 +270,14 @@ class FeedManager(object):
                     ignore_time = entry.get('ignore_time', False),
                     frequent = entry.get('frequent', False)
                 )
-            for target in entry['targets']:
-                formatter = self.formatter_class(
-                    target=target.strip(),
-                    message_format=entry['format'],
-                    arguments={'name': entry['name']},
-                    digest=entry.get('digest', False)
-                )
-                yield (self.fetcher[key], formatter)
+            formatter = self.formatter_class(
+                targets=entry['targets'],
+                message_format=entry['format'],
+                arguments={'name': entry['name']},
+                digest=entry.get('digest', False),
+                exclude=entry.get('exclude', []),
+            )
+            yield (self.fetcher[key], formatter)
 
     def _get_entry_key(self, entry):
         return (entry['uri'], entry.get('ignore_time', False))
