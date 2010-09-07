@@ -8,6 +8,7 @@ import traceback
 from collections import defaultdict
 
 import tweepy
+tweepy.debug()
 
 FILE_PATH = os.path.dirname(__file__)
 
@@ -107,9 +108,13 @@ class TwitterManager(FeedManager):
         friends = set()
         list_members = defaultdict(set)
         for user_name in data['user']:
-            password = getpass.getpass("Twitter password for %s: " % user_name)
-            self.api[user_name] = tweepy.API(tweepy.BasicAuthHandler(user_name,
-                password))
+            auth = tweepy.OAuthHandler(data['consumer_key'],
+                data['consumer_secret'])
+            url = auth.get_authorization_url()
+            print('Authorization URL: {0}'.format(url))
+            verifier = input('Input verifier PIN: ')
+            auth.get_access_token(verifier)
+            self.api[user_name] = tweepy.API(auth)
         for entry in data['entry']:
             for user in entry.get('user', []):
                 friends.add(user)
