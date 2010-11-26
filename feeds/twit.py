@@ -1,6 +1,7 @@
 #coding: utf-8
 import email.utils
 import getpass
+import http.client
 import imp
 import os.path
 import datetime
@@ -29,11 +30,13 @@ class TwitterFetcher(FeedFetcher):
     def get_entries(self):
         try:
             timeline = self.api.friends_timeline()
+        except http.client.HTTPException:
+            traceback.print_exc()
+            return
         except tweepy.error.TweepError as e:
             traceback.print_exc()
             self.fetch_period *= 2
             self.next_fetch += self.fetch_period
-            print(self.fetch_period)
             return
         self.fetch_period = datetime.timedelta(seconds=180)
         self.next_fetch = datetime.datetime.now() + self.fetch_period
@@ -57,7 +60,7 @@ class TwitterFetcher(FeedFetcher):
         for friend, cache in self.cache.items():
             if not cache.initialized:
                 cache.load_cache()
-            entries = [_ for _ in all_entries if _['user'] == friend]
+            entries = [_ for _ in (all_entries or []) if _['user'] == friend]
             # XXX remove duplicate
             fresh_entries = [_ for _ in entries + cache.entries \
                 if cache.is_entry_fresh(_)]
@@ -111,6 +114,7 @@ class TwitterManager(FeedManager):
             auth = tweepy.OAuthHandler(data['consumer_key'],
                 data['consumer_secret'])
             url = auth.get_authorization_url()
+            print('')
             print('Authorization URL: {0}'.format(url))
             verifier = input('Input verifier PIN: ')
             auth.get_access_token(verifier)

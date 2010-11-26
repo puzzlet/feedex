@@ -144,8 +144,8 @@ class FeedFetcher(object):
             self.load_cache()
         entries = self.get_entries()
         # TODO: remove duplicate
-        fresh_entries = [_ for _ in entries + (self.entries or [])
-            if self.is_entry_fresh(_)]
+        all_entries = (entries or []) + (self.entries or [])
+        fresh_entries = [_ for _ in all_entries if self.is_entry_fresh(_)]
         if not fresh_entries:
             return []
         self.save_cache(entries)
