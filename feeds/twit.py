@@ -9,7 +9,6 @@ import traceback
 from collections import defaultdict
 
 import tweepy
-tweepy.debug()
 
 FILE_PATH = os.path.dirname(__file__)
 

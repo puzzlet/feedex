@@ -4,6 +4,7 @@ import datetime
 import email.utils
 import os
 import re
+import threading
 import time
 import traceback
 import urllib.parse
@@ -12,14 +13,79 @@ from collections import defaultdict
 import feedparser
 import yaml
 
-from util import limit_time
-from util import rfc2timestamp, tuple2rfc
-from util import LocalTimezone
-
 FILE_PATH = os.path.dirname(__file__)
 FUTURE_THRESHOLD = seconds=86400
 TIMEOUT_THRESHOLD = 30
 MAX_CHAR = 300
+
+class TimedOutException(Exception):
+    def __init__(self, value = "Timed Out"):
+        self.value = value
+
+    def __str__(self):
+        return repr(self.value)
+
+def limit_time(timeout_duration):
+    # from http://code.activestate.com/recipes/473878/
+    def decorate(func):
+        def new_func(*args, **kwargs):
+            class InterruptableThread(threading.Thread):
+                def __init__(self):
+                    threading.Thread.__init__(self)
+                    self.result = None
+                    self.exception = None
+                def run(self):
+                    try:
+                        self.result = func(*args, **kwargs)
+                    except e:
+                        self.exception = e
+            it = InterruptableThread()
+            it.start()
+            it.join(timeout_duration)
+            if it.isAlive():
+                raise TimedOutException
+            if it.exception:
+                raise it.exception
+            return it.result
+        new_func.__name__ = func.__name__
+        return new_func
+    return decorate
+
+def rfc2timestamp(rfc, default=0):
+    if rfc:
+        return calendar.timegm(email.utils.parsedate(rfc))
+    else:
+        return default
+
+def tuple2rfc(time_tuple):
+    return email.utils.formatdate(calendar.timegm(time_tuple))
+
+class LocalTimezone(datetime.tzinfo):
+    ZERO = datetime.timedelta(0)
+    STDOFFSET = datetime.timedelta(seconds=-time.timezone)
+    DSTOFFSET = datetime.timedelta(seconds=-time.altzone)
+    DSTDIFF = DSTOFFSET - STDOFFSET
+    def utcoffset(self, dt):
+        if self._isdst(dt):
+            return self.DSTOFFSET
+        else:
+            return self.STDOFFSET
+
+    def dst(self, dt):
+        if self._isdst(dt):
+            return self.DSTDIFF
+        else:
+            return self.ZERO
+
+    def tzname(self, dt):
+        return time.tzname[self._isdst(dt)]
+
+    def _isdst(self, dt):
+        tt = (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second,
+              dt.weekday(), 0, -1)
+        stamp = time.mktime(tt)
+        tt = time.localtime(stamp)
+        return tt.tm_isdst > 0
 
 def get_updated(entry, default=None):
     """Returns updated time of the entry, in unix timestamp.
@@ -144,8 +210,8 @@ class FeedFetcher(object):
             self.load_cache()
         entries = self.get_entries()
         # TODO: remove duplicate
-        all_entries = (entries or []) + (self.entries or [])
-        fresh_entries = [_ for _ in all_entries if self.is_entry_fresh(_)]
+        fresh_entries = [_ for _ in (entries or []) + (self.entries or [])
+            if self.is_entry_fresh(_)]
         if not fresh_entries:
             return []
         self.save_cache(entries)
@@ -272,7 +338,7 @@ class FeedManager(object):
                 )
             formatter = self.formatter_class(
                 targets=entry['targets'],
-                message_format=entry['format'],
+                message_format=entry.get('format', ''),
                 arguments={'name': entry['name']},
                 digest=entry.get('digest', False),
                 exclude=entry.get('exclude', []),
@@ -291,7 +357,10 @@ class FeedManager(object):
             traceback.print_exc()
 
     def load_formats(self):
-        return yaml.load(open(os.path.join(FILE_PATH, 'format.yml')))
+        file_path = os.path.join(FILE_PATH, 'format.yml')
+        if not os.access(file_path, os.F_OK):
+            return {}
+        return yaml.load(open(file_path))
 
     def reload(self):
         fetcher_old = self.fetcher

@@ -1,21 +1,19 @@
 #!/usr/bin/env python
 # -*- encoding: utf-8 -*-
-import datetime
 import imp
 import itertools
+import logging
 import os
 import sys
 import time
-import traceback
 from collections import defaultdict
 
 import irclib
 import yaml
 
 from BufferingBot import BufferingBot, Message
-
 import feeds
-from util import trace, to_datetime, LocalTimezone
+from feeds.general import LocalTimezone
 
 class FeedBot(BufferingBot):
     def __init__(self, config_file_name):
@@ -34,7 +32,7 @@ class FeedBot(BufferingBot):
             buffer_timeout=-1, # don't use timeout
             use_ssl=self.config.get('use_ssl', False))
 
-        trace("Loading buffer...")
+        logging.info("Loading buffer...")
         if os.access(self.buffer_file_name, os.F_OK):
             for message in yaml.load(open(self.buffer_file_name, 'rb')):
                 self.push_message(message)
@@ -62,7 +60,7 @@ class FeedBot(BufferingBot):
         try:
             return eval(open(self.config_file_name).read())
         except SyntaxError:
-            traceback.print_exc()
+            logging.exception('while reading {}'.format(self.config_file_name))
         return None
 
     def _check_config_file(self):
@@ -71,11 +69,11 @@ class FeedBot(BufferingBot):
                 return
             self.reload()
         except Exception:
-            traceback.print_exc()
+            logging.exception('')
         self.ircobj.execute_delayed(1, self._check_config_file)
 
     def _on_connected(self, conn, _):
-        trace('Connected.')
+        logging.info('Connected.')
         if self.initialized:
             return
         if conn != self.connection:
@@ -115,8 +113,7 @@ class FeedBot(BufferingBot):
         try:
             entries = fetcher.get_fresh_entries()
         except Exception:
-            trace('An error occured while trying to get %s:' % fetcher.uri)
-            traceback.print_exc(limit=None)
+            logging.exception('while trying to get {}'.format(fetcher.uri))
             return
         for formatter in self.feeds[fetcher]:
             try:
@@ -127,15 +124,15 @@ class FeedBot(BufferingBot):
                         timestamp=opt.get('timestamp', 0))
                     self.push_message(message)
             except Exception:
-                print('An error occured while trying to format an entries from %s:' % fetcher.uri)
-                traceback.print_exc(limit=None)
+                logging.exception(
+                    'while trying to format an entry from {}'.format(fetcher.uri))
                 return
         if entries:
             try:
                 fetcher.update_timestamp(entries)
             except Exception:
-                print('An error occured while updating timestamp for %s:' % fetcher.uri)
-                traceback.print_exc(limit=None)
+                logging.exception(
+                    'while updating timestamp for {}'.format(fetcher.uri))
                 return
 
     def flood_control(self):
@@ -158,7 +155,7 @@ class FeedBot(BufferingBot):
         return BufferingBot.pop_buffer(self, message_buffer)
 
     def process_message(self, message):
-        trace(message.command, ' '.join(message.arguments))
+        logging.info('%s %s', message.command, ' '.join(message.arguments))
         if self.debug_mode:
             return True
         return BufferingBot.process_message(self, message)
@@ -187,9 +184,9 @@ class FeedBot(BufferingBot):
     def reload(self):
         if not self.load():
             return False
-        trace("reloading...")
+        logging.info("reloading...")
         self.reload_feed()
-        trace("reloaded.")
+        logging.info("reloaded.")
         return True
 
     def reload_feed(self):
@@ -216,9 +213,9 @@ class FeedBot(BufferingBot):
                     if fetcher.frequent:
                         self.frequent_fetches[fetcher] = True
             except Exception:
-                traceback.print_exc()
+                logging.exception('')
                 continue
-            trace('%s loaded successfully.' % handler['__name__'])
+            logging.info('%s loaded successfully.', handler['__name__'])
 
     def _reload_feed_data(self):
         self._load_feed_data()
@@ -226,12 +223,13 @@ class FeedBot(BufferingBot):
 FEEDEX_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 def main():
+    logging.basicConfig(level=logging.INFO)
     profile = None
     if len(sys.argv) > 1:
         profile = sys.argv[1]
     if not profile:
         profile = 'config'
-    trace("profile: %s" % profile)
+    logging.info("profile: %s", profile)
     config_file_name = os.path.join(FEEDEX_ROOT, '%s.py' % profile)
     feedex = FeedBot(config_file_name)
     feedex.start()
