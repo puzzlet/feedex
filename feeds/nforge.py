@@ -47,7 +47,7 @@ class NForgeFormatter(EntryFormatter):
             exclude=None):
         EntryFormatter.__init__(self,
             targets=targets,
-            message_format='[%(user)s] %title (%(date)s)')
+            message_format='[%(user)s] %(title)s (%(date)s)')
 
 class ToonkManager:
     def load(self):
