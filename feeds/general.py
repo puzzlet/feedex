@@ -252,7 +252,7 @@ class EntryFormatter(object):
         for pattern in self.exclude:
             if re.match(pattern, entry['title']):
                 return
-        msg = self.message_format % self.build_arguments(entry)
+        msg = self.message_format.format(**self.build_arguments(entry))
         opt = {
             'timestamp': get_updated(entry)
         }
@@ -287,7 +287,7 @@ class EntryFormatter(object):
                 for target in self.targets:
                     yield (target, msg_buffer, {})
                 msg_buffer = ''
-            msg_buffer += delimiter if msg_buffer else '[%(name)s]' % args # XXX
+            msg_buffer += delimiter if msg_buffer else '[{name}]'.format(args) # XXX
             msg_buffer += msg
             if len(msg_buffer) > MAX_CHAR:
                 for target in self.targets:
