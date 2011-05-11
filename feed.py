@@ -150,8 +150,9 @@ class FeedBot(BufferingBot):
         if message.command in ['privmsg']:
             target = message.arguments[0]
             chan = irclib.irc_lower(self.codec.encode(target)[0])
-            if chan not in self.channels and irclib.is_channel(chan):
-                self.connection.join(chan)
+            if irclib.is_channel(chan):
+                if chan not in [irclib.irc_lower(_) for _ in self.channels]:
+                    self.connection.join(chan)
         return BufferingBot.pop_buffer(self, message_buffer)
 
     def process_message(self, message):

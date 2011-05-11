@@ -1,14 +1,18 @@
 #coding: utf-8
+import datetime
 import email.utils
 import getpass
 import http.client
 import imp
 import os.path
-import datetime
+import re
 import traceback
+import zlib
+
 from collections import defaultdict
 
 import tweepy
+tweepy.debug()
 
 FILE_PATH = os.path.dirname(__file__)
 
@@ -76,22 +80,42 @@ class TwitterFetcher(FeedFetcher):
             if user in users:
                 cache.update_timestamp(entries)
 
+def format_nick(nick):
+    colors = [3, 4, 5, 6, 7, 9, 10, 11, 12, 13]
+    color = colors[zlib.adler32(nick.encode('utf-8')) % len(colors)]
+    return '\x03{color:02}{nick}\x03\x02\x02'.format(
+        color=color,
+        nick=nick,
+    )
+
+def nick_repl(match):
+    return format_nick(match.group(1))
+
 class TwitterFormatter(EntryFormatter):
-    def __init__(self, targets, user_names):
+    def __init__(self, targets, user_names=None, matches=None):
         EntryFormatter.__init__(
             self,
             targets=targets,
-            message_format='%(user)s: %(title)s (%(time)s)')
-        self.user_names = [_.lower() for _ in user_names]
+            message_format='{user}: {title} ({time})')
+        self.user_names = [_.lower() for _ in user_names or []]
+        self.matches = matches or []
 
     def format_entry(self, entry):
-        if entry['user'].lower() not in self.user_names:
-            return
+        if len(self.user_names):
+            if entry['user'].lower() not in self.user_names:
+                return
+        if len(self.matches):
+            if not any(re.match(_, entry['title']) for _ in self.matches):
+                return
         return EntryFormatter.format_entry(self, entry)
 
     def build_arguments(self, entry):
         result = EntryFormatter.build_arguments(self, entry)
-        result['user'] = entry['user']
+        result['title'] = re.sub(
+            r'(?<=@)(\w+)',
+            nick_repl,
+            result['title'])
+        result['user'] = format_nick(entry['user'])
         return result
 
 class TwitterManager(FeedManager):
@@ -146,7 +170,8 @@ class TwitterManager(FeedManager):
                 user_names.add(user)
             formatter = self.formatter_class(
                 targets=entry['targets'],
-                user_names=user_names)
+                user_names=user_names,
+                matches=entry.get('match', []))
             for user in data['user']:
                 yield (self.fetcher[user], formatter)
                 # XXX duplicate entries when multiple data['user']
