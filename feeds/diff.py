@@ -5,7 +5,7 @@ import re
 from .general import EntryFormatter
 
 class DiffFormatter(EntryFormatter):
-    def __init__(self, targets, message_format='%(title)s',
+    def __init__(self, targets, message_format='{title}',
             show_equal_line=False):
         EntryFormatter.__init__(self, targets=targets,
             message_format=message_format)

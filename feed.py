@@ -22,7 +22,7 @@ class FeedBot(BufferingBot):
         self.buffer_file_name = os.path.join(FEEDEX_ROOT, 'buffer.yml')
         self.version = -1
         self.config_timestamp = -1
-        self.debug_mode = False
+        self.silent = False
         self.load()
 
         server = self.config['server']
@@ -146,7 +146,7 @@ class FeedBot(BufferingBot):
             # 미래에 보여줄 것은 미래까지 기다림
             # TODO: ignore_time이면 이 조건 무시
             return False
-        if self.debug_mode:
+        if self.silent:
             return self.process_message(message_buffer.pop())
         if message.command in ['privmsg']:
             target = message.arguments[0]
@@ -158,7 +158,7 @@ class FeedBot(BufferingBot):
 
     def process_message(self, message):
         logging.info('%s %s', message.command, ' '.join(message.arguments))
-        if self.debug_mode:
+        if self.silent:
             return True
         return BufferingBot.process_message(self, message)
 
@@ -180,7 +180,6 @@ class FeedBot(BufferingBot):
         self.config = data
         self.config_timestamp = os.stat(self.config_file_name).st_mtime
         self.version = data['version']
-        self.debug_mode = data.get('debug', False)
         return True
 
     def reload(self):
@@ -226,15 +225,19 @@ class FeedBot(BufferingBot):
 FEEDEX_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 def main():
-    logging.basicConfig(level=logging.INFO)
-#    logging.basicConfig(level=logging.DEBUG)
     profile = None
     if len(sys.argv) > 1:
         profile = sys.argv[1]
     if not profile:
         profile = 'config'
-    logging.info("profile: %s", profile)
     config_file_name = os.path.join(FEEDEX_ROOT, '%s.py' % profile)
+    data = eval(open(config_file_name).read())
+    if data.get('debug', False):
+        logging.basicConfig(level=logging.DEBUG)
+        logging.debug('Debugging mode')
+    else:
+        logging.basicConfig(level=logging.INFO)
+    logging.info("profile: %s", profile)
     feedex = FeedBot(config_file_name)
     feedex.start()
 
