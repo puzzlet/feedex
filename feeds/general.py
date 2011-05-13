@@ -172,7 +172,6 @@ class FeedFetcher(object):
         self.entries = data['entries']
 
     def initialize_cache(self):
-        logging.debug('initialize_cache: {}'.format(self.uri))
         self.last_confirmed = time.time()
         self.save_cache([])
         self.initialized = True

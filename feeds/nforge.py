@@ -57,6 +57,7 @@ class NForgeFormatter(EntryFormatter):
     def build_arguments(self, entry):
         result = EntryFormatter.build_arguments(self, entry)
         result['user'] = entry['user']
+        return result
 
 manager = FeedManager(
     'nforge.yml',
