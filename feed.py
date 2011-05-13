@@ -109,6 +109,7 @@ class FeedBot(BufferingBot):
             self.config.get('fetch_period', 3), self._iter_feed)
 
     def fetch_feed(self, fetcher):
+        logging.debug('Fetching: {}'.format(fetcher.uri))
         entries = []
         try:
             entries = fetcher.get_fresh_entries()
@@ -210,6 +211,7 @@ class FeedBot(BufferingBot):
             manager = handler['manager']
             try:
                 for fetcher, formatter in manager.load():
+                    logging.debug('Loaded: {}'.format(fetcher.uri))
                     self.feeds[fetcher].append(formatter)
                     if fetcher.frequent:
                         self.frequent_fetches[fetcher] = True
@@ -225,6 +227,7 @@ FEEDEX_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 def main():
     logging.basicConfig(level=logging.INFO)
+#    logging.basicConfig(level=logging.DEBUG)
     profile = None
     if len(sys.argv) > 1:
         profile = sys.argv[1]
