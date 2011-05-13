@@ -55,7 +55,7 @@ class NForgeFormatter(EntryFormatter):
             message_format='[{name}] {user} {title} ({date})')
 
     def build_arguments(self, entry):
-        result = EntryFormatter(entry)
+        result = EntryFormatter.build_arguments(self, entry)
         result['user'] = entry['user']
 
 manager = FeedManager(
