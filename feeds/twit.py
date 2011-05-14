@@ -2,6 +2,7 @@
 import datetime
 import email.utils
 import getpass
+import html.entities
 import http.client
 import imp
 import os.path
@@ -12,7 +13,6 @@ import zlib
 from collections import defaultdict
 
 import tweepy
-tweepy.debug()
 
 FILE_PATH = os.path.dirname(__file__)
 
@@ -91,6 +91,9 @@ def format_nick(nick):
 def nick_repl(match):
     return format_nick(match.group(1))
 
+def entity_repl(match):
+    return html.entities.entitydefs[match.group(1)]
+
 class TwitterFormatter(EntryFormatter):
     def __init__(self, targets, user_names=None, matches=None):
         EntryFormatter.__init__(
@@ -111,6 +114,7 @@ class TwitterFormatter(EntryFormatter):
 
     def build_arguments(self, entry):
         result = EntryFormatter.build_arguments(self, entry)
+        result['title'] = re.sub(r'&(\w+);', entity_repl, result['title'])
         result['title'] = re.sub(
             r'(?<=@)(\w+)',
             nick_repl,
