@@ -1,0 +1,9 @@
+[submodule "feedparser"]
+	path = feedparser
+	url = git://github.com/puzzlet/feedparser.git
+[submodule "irclib"]
+	path = irclib
+	url = git://github.com/puzzlet/python-irclib.git
+[submodule "BufferingBot"]
+	path = BufferingBot
+	url = git://github.com/puzzlet/BufferingBot.git
