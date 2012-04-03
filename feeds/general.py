@@ -192,15 +192,17 @@ class FeedFetcher(object):
         return True
 
     @limit_time(TIMEOUT_THRESHOLD)
-    def _parse_feed(self):
+    def _parse_feed(self, request_headers=None):
         try:
             kwargs = {}
-            kwargs['referrer'] = self.main_link
+            if self.main_link:
+                kwargs['referrer'] = self.main_link
             if self.etag:
                 kwargs['etag'] = self.etag
             if self.last_modified:
                 kwargs['modified'] = time.gmtime(self.last_modified)
-            return feedparser.parse(self.uri, **kwargs)
+            return feedparser.parse(self.uri,
+                request_headers=request_headers or {}, **kwargs)
         except Exception:
             print('An error occured while trying to get %s:' % self.uri)
             traceback.print_exc(limit=None)

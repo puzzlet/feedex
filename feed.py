@@ -28,6 +28,7 @@ class FeedBot(BufferingBot):
         server = self.config['server']
         nickname = self.config['nickname']
         BufferingBot.__init__(self, [server], nickname,
+            username=b'FeedEx',
             realname=b'FeedEx the feed bot',
             buffer_timeout=-1, # don't use timeout
             use_ssl=self.config.get('use_ssl', False))
@@ -233,6 +234,7 @@ def main():
     config_file_name = os.path.join(FEEDEX_ROOT, '%s.py' % profile)
     data = eval(open(config_file_name).read())
     if data.get('debug', False):
+        irclib.DEBUG = 1
         logging.basicConfig(level=logging.DEBUG)
         logging.debug('Debugging mode')
     else:
