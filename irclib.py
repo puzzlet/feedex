@@ -1,1 +1,0 @@
-irclib/irclib.py

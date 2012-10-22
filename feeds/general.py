@@ -225,8 +225,8 @@ class FeedFetcher(object):
             return []
         self.main_link = feed.get('link', None)
         self.etag = feed.get('etag', None)
-        if 'updated' in feed:
-            self.last_modified = time.mktime(feed['updated'])
+        if 'updated_parsed' in feed:
+            self.last_modified = time.mktime(feed['updated_parsed'])
         return feed['entries']
 
     def update_timestamp(self, entries):

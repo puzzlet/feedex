@@ -1,1 +1,0 @@
-irclib/ircbot.py

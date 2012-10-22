@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # -*- encoding: utf-8 -*-
-import imp
 import itertools
 import logging
 import os
@@ -8,12 +7,13 @@ import sys
 import time
 from collections import defaultdict
 
-import irclib
+import irc.client
 import yaml
 
 from BufferingBot import BufferingBot, Message
 import feeds
-from feeds.general import LocalTimezone
+
+FEEDEX_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 class FeedBot(BufferingBot):
     def __init__(self, config_file_name):
@@ -28,8 +28,8 @@ class FeedBot(BufferingBot):
         server = self.config['server']
         nickname = self.config['nickname']
         BufferingBot.__init__(self, [server], nickname,
-            username=b'FeedEx',
-            realname=b'FeedEx the feed bot',
+            username='FeedEx',
+            realname='FeedEx the feed bot',
             buffer_timeout=-1, # don't use timeout
             use_ssl=self.config.get('use_ssl', False))
 
@@ -151,9 +151,9 @@ class FeedBot(BufferingBot):
             return self.process_message(message_buffer.pop())
         if message.command in ['privmsg']:
             target = message.arguments[0]
-            chan = irclib.irc_lower(self.codec.encode(target)[0])
-            if irclib.is_channel(chan):
-                if chan not in [irclib.irc_lower(_) for _ in self.channels]:
+            chan = target.lower()
+            if irc.client.is_channel(chan):
+                if chan not in [_.lower() for _ in self.channels]:
                     self.connection.join(chan)
         return BufferingBot.pop_buffer(self, message_buffer)
 
@@ -223,7 +223,6 @@ class FeedBot(BufferingBot):
     def _reload_feed_data(self):
         self._load_feed_data()
 
-FEEDEX_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 def main():
     profile = None
@@ -234,7 +233,6 @@ def main():
     config_file_name = os.path.join(FEEDEX_ROOT, '%s.py' % profile)
     data = eval(open(config_file_name).read())
     if data.get('debug', False):
-        irclib.DEBUG = 1
         logging.basicConfig(level=logging.DEBUG)
         logging.debug('Debugging mode')
     else:
@@ -243,6 +241,6 @@ def main():
     feedex = FeedBot(config_file_name)
     feedex.start()
 
+
 if __name__ == '__main__':
     main()
-
