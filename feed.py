@@ -239,7 +239,14 @@ def main():
         logging.basicConfig(level=logging.INFO)
     logging.info("profile: %s", profile)
     feedex = FeedBot(config_file_name)
-    feedex.start()
+    while True:
+        try:
+            feedex.start()
+        except KeyboardInterrupt:
+            logging.exception('')
+            break
+        except:
+            logging.exception('')
 
 
 if __name__ == '__main__':
