@@ -4,3 +4,6 @@
 [submodule "feedparser"]
 	path = feedparser
 	url = git://github.com/puzzlet/feedparser.git
+[submodule "python-irc"]
+	path = python-irc
+	url = git@github.com:puzzlet/irc.git

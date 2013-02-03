@@ -28,8 +28,8 @@ class FeedBot(BufferingBot):
         server = self.config['server']
         nickname = self.config['nickname']
         BufferingBot.__init__(self, [server], nickname,
-            username='FeedEx',
-            realname='FeedEx the feed bot',
+            username="FeedEx",
+            realname="FeedEx the feed bot",
             buffer_timeout=-1, # don't use timeout
             use_ssl=self.config.get('use_ssl', False))
 
@@ -247,6 +247,7 @@ def main():
             break
         except:
             logging.exception('')
+            raise
 
 
 if __name__ == '__main__':
